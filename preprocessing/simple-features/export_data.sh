@@ -8,11 +8,9 @@ if [[ -z $1 ]]; then
     exit 1
 fi
 
+# Skip computation since we do it in al-features, just copy that one
 echo "Updating sensor/activity lists"
-sensor_names="$(cat "$@" | cut -d' ' -f3 | sort -u | tr '\n' ' ')"
-activity_labels="$(cat "$@" | cut -d' ' -f5 | sort -u | tr '\n' ' ')"
-sed -i "s#^sensors .*\$#sensors $sensor_names#g" "al.config"
-sed -i "s#^activities .*\$#activities $activity_labels#g" "al.config"
+cp ../al-features/al.config .
 
 . /scripts/threading
 thread_init

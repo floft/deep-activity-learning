@@ -63,7 +63,7 @@ def create_dataset(
         seed=0,
         overlap=False,
         folds=3,
-        files=["half1", "half2", "hh101", "hh102", "hh103", "hh104", "hh105"]):
+        files=["half1", "half2", "hh101", "hh102", "hh103", "hh104", "hh105", "hh117"]):
     """
     First dataset to try
     """

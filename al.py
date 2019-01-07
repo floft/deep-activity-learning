@@ -8,31 +8,7 @@ import numpy as np
 
 from sklearn.ensemble import RandomForestClassifier
 
-def load_hdf5_full(filename):
-    """
-    Load x,y data from hdf5 file -- create dictionary of all data in file
-    """
-    d = {
-            "features_train": [],
-            "features_test": [],
-            "labels_train": [],
-            "labels_test": [],
-        }
-    data = h5py.File(filename, "r")
-
-    for fold in data.keys():
-        d["features_train"].append(np.array(data[fold]["features_train"]))
-        d["features_test"].append(np.array(data[fold]["features_test"]))
-        d["labels_train"].append(np.array(data[fold]["labels_train"]))
-        d["labels_test"].append(np.array(data[fold]["labels_test"]))
-
-    return d
-
-def load_hdf5(filename):
-    """
-    Load x,y data from hdf5 file -- don't load everything, better for large files
-    """
-    return h5py.File(filename, "r")
+from load_data import load_hdf5
 
 def compute_accuracy(y_hat, y):
     # TODO maybe exclude Other_Activity for now?

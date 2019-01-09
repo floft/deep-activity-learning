@@ -61,9 +61,9 @@ def create_dataset(
         window_size,
         subdir="hh",
         seed=0,
-        overlap=False,
+        overlap=True,
         folds=3,
-        files=["half1", "half2", "hh101", "hh102", "hh103", "hh104", "hh105", "hh117"]):
+        files=["all", "hh101", "hh102", "hh103", "hh104", "hh105", "hh117"]):
     """
     First dataset to try
     """
@@ -74,14 +74,6 @@ def create_dataset(
         x, y = load_hdf5(f)
         assert len(x) == len(y), "Must have label for each feature vector"
 
-        # Expand dimensions to be (# examples, 1, # features)
-        x = np.expand_dims(x, axis=1).astype(np.float32)
-
-        # Above we expanded to be window_size=1, so if that's the case, we're
-        # already done
-        if window_size != 1:
-            x, y = create_windows(x, y, window_size, overlap)
-
         # Indices for each cross validation fold -- must recalculate since each
         # file is a different size
         tscv = TimeSeriesSplit(n_splits=folds)
@@ -89,11 +81,15 @@ def create_dataset(
         train_indices = []
         test_indices = []
 
+        # Train/test split before calculating windows since if overlap=True, we
+        # still don't want overlap between the train/test splits -- only within
+        # the train set and within the test set
         for train, test in tscv.split(x):
             train_indices.append(train)
             test_indices.append(test)
 
-        assert len(train_indices) == len(test_indices), "Number of train/test folds must match"
+        assert len(train_indices) == len(test_indices), \
+            "Number of train/test folds must match"
 
         # Output to file
         out = h5py.File(prefix+"_"+name+".hdf5", "w")
@@ -102,10 +98,27 @@ def create_dataset(
             train = train_indices[fold]
             test = test_indices[fold]
 
-            out.create_dataset(str(fold)+"/features_train", data=x[train], compression="gzip")
-            out.create_dataset(str(fold)+"/features_test", data=x[test], compression="gzip")
-            out.create_dataset(str(fold)+"/labels_train", data=y[train], compression="gzip")
-            out.create_dataset(str(fold)+"/labels_test", data=y[test], compression="gzip")
+            # Expand dimensions to be (# examples, 1, # features)
+            x_train = np.expand_dims(x[train], axis=1).astype(np.float32)
+            y_train = y[train]
+
+            # Above we expanded to be window_size=1, so if that's the case, we're
+            # already done
+            if window_size != 1:
+                x_train, y_train = create_windows(x_train, y_train, window_size, overlap)
+
+            out.create_dataset(str(fold)+"/features_train", data=x_train, compression="gzip")
+            out.create_dataset(str(fold)+"/labels_train", data=y_train, compression="gzip")
+
+            # We do train and test sets separate since this can reduce memory usage
+            x_test = np.expand_dims(x[test], axis=1).astype(np.float32)
+            y_test = y[test]
+
+            if window_size != 1:
+                x_test, y_test = create_windows(x_test, y_test, window_size, overlap)
+
+            out.create_dataset(str(fold)+"/features_test", data=x_test, compression="gzip")
+            out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
 
 if __name__ == "__main__":
     create_dataset("../preprocessing/al-features", "al",

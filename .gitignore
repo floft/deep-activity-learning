@@ -6,7 +6,8 @@
 *.pyc
 
 # AL
-preprocessing/raw/model/
+*.translate
+preprocessing/translated/model/
 
 # TensorFlow
 *.tfevents*

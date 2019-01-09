@@ -8,11 +8,9 @@ import numpy as np
 
 from sklearn.ensemble import RandomForestClassifier
 
-from load_data import load_hdf5
+from load_data import load_hdf5 # TODO load DA concatenation stuff
 
 def compute_accuracy(y_hat, y):
-    # TODO maybe exclude Other_Activity for now?
-    # TODO maybe move all .py into root dir so I can share code?
     assert len(y_hat) == len(y), "y must be same length as y"
     return sum(y_hat == y)/len(y)
 

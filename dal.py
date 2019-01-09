@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from plot import plot_embedding, plot_random_time_series, plot_real_time_series
 from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat
 from load_data import IteratorInitializerHook, _get_input_fn, \
-    one_hot, domain_labels, load_data_home, Config
+    one_hot, domain_labels, load_data_home_da, Config
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -772,6 +772,12 @@ if __name__ == '__main__':
         help="Run on the smart home dataset (default)")
     parser.add_argument('--no-home', dest='home', action='store_false',
         help="Do not run on the smart home dataset")
+    parser.add_argument('--fold', default=0, type=int,
+        help="What fold to use from the dataset files (default fold 0)")
+    parser.add_argument('--target', default="hh101", type=str,
+        help="What dataset to use as the target (default \"hh101\")")
+    parser.add_argument('--features', default="simple", type=str,
+        help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
     parser.add_argument('--units', default=100, type=int,
         help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
     parser.add_argument('--steps', default=100000, type=int,
@@ -830,7 +836,7 @@ if __name__ == '__main__':
         train_data_a, train_labels_a, \
         test_data_a, test_labels_a, \
         train_data_b, train_labels_b, \
-        test_data_b, test_labels_b = load_data_home()
+        test_data_b, test_labels_b = load_data_home_da(args.fold, args.target, args.features)
 
         # Information about dataset
         index_one = False # Labels start from 0
@@ -839,6 +845,10 @@ if __name__ == '__main__':
         num_classes = int(np.max(train_labels_a)+1) # it's in [0, ..., |classes|-1]
         multi_class = False # Predict only one class
         class_weights = 1.0 # TODO check if balanced
+
+        # Due to the large class imbalance, we should weight the + class more
+        # e.g. 1/(counts/len) if power is 1
+        #class_weights = np.power(len(train_labels_a)/counts, args.balance_pow)
 
     # If we disabled balancing, set class_weights to 1
     if not args.balance:

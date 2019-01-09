@@ -26,6 +26,7 @@ class IteratorInitializerHook(tf.train.SessionRunHook):
 
 def _get_input_fn(features, labels, batch_size, evaluation=False, buffer_size=5000,
     eval_shuffle_seed=0):
+    """ Load data from numpy arrays (requires more memory but less disk space) """
     iter_init_hook = IteratorInitializerHook()
 
     def input_fn():
@@ -45,6 +46,28 @@ def _get_input_fn(features, labels, batch_size, evaluation=False, buffer_size=50
         # Need to initialize iterator after creating a session in the estimator
         iter_init_hook.iter_init_func = lambda sess: sess.run(iterator.initializer,
                 feed_dict={features_placeholder: features, labels_placeholder: labels})
+
+        return next_data_batch, next_label_batch
+    return input_fn, iter_init_hook
+
+def _get_tfrecord_input_fn(filenames, batch_size, evaluation=False, buffer_size=5000,
+    eval_shuffle_seed=0):
+    """ Load data from .tfrecord files (requires less memory but more disk space) """
+    iter_init_hook = IteratorInitializerHook()
+
+    def input_fn():
+        dataset = tf.data.TFRecordDataset(filenames)
+
+        if evaluation:
+            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
+        else:
+            dataset = dataset.repeat().shuffle(buffer_size).batch(batch_size)
+
+        iterator = dataset.make_initializable_iterator()
+        next_data_batch, next_label_batch = iterator.get_next()
+
+        # Need to initialize iterator after creating a session in the estimator
+        iter_init_hook.iter_init_func = lambda sess: sess.run(iterator.initializer)
 
         return next_data_batch, next_label_batch
     return input_fn, iter_init_hook
@@ -151,6 +174,8 @@ def load_single_fold(filename, fold=None):
     # the most training data)
     if fold is None:
         fold = list(data.keys())[-1]
+    else:
+        fold = str(fold) # even though it's 0,1,2,3... it's actually strings
 
     train_data = np.array(data[fold]["features_train"])
     train_labels = np.array(data[fold]["labels_train"])
@@ -160,18 +185,68 @@ def load_single_fold(filename, fold=None):
     return train_data, train_labels, \
         test_data, test_labels
 
-def load_data_home(feature_set="simple", subdir="hh", A="half1", B="hh117"):
+def load_data_home(feature_set="simple", dir_name="datasets", A="half1", B="hh117"):
     """
     Load hh/half1.hdf5 as domain A and hh/half2.hdf5 as domain B, use the last
     fold for now -- TODO cross validation
     """
     train_data_a, train_labels_a, \
     test_data_a, test_labels_a = \
-        load_single_fold(os.path.join("datasets", feature_set+"_"+A+".hdf5"))
+        load_single_fold(os.path.join(dir_name, feature_set+"_"+A+".hdf5"))
 
     train_data_b, train_labels_b, \
     test_data_b, test_labels_b = \
-        load_single_fold(os.path.join("datasets", feature_set+"_"+B+".hdf5"))
+        load_single_fold(os.path.join(dir_name, feature_set+"_"+B+".hdf5"))
+
+    return train_data_a, train_labels_a, \
+        test_data_a, test_labels_a, \
+        train_data_b, train_labels_b, \
+        test_data_b, test_labels_b
+
+def load_data_home_da(fold, target, feature_set, dir_name="datasets"):
+    """
+    Concatate all dataset files (of a particular fold) together except for the
+    target dataset file into domain A and only the target dataset file as
+    domain B.
+
+    e.g. if 4 dataset files hh101, hh102, hh103, hh104 and target is hh101, then
+        domain A: hh102, hh103, hh104
+        domain B: hh101
+    """
+    # Get list of all the datasets
+    files = pathlib.Path(dir_name).glob(feature_set+"_*.hdf5")
+    paths = [(x.stem, str(x)) for x in files]
+    target_file = None
+    train_data_a = []
+    train_labels_a = []
+    test_data_a = []
+    test_labels_a = []
+
+    # Source(s) -- all except target
+    for name, f in paths:
+        # Skip target for now
+        if name == feature_set+"_"+target:
+            target_file = f
+            continue
+
+        train_data_partial, train_labels_partial, \
+        test_data_partial, test_labels_partial = load_single_fold(f, fold)
+
+        train_data_a.append(train_data_partial)
+        train_labels_a.append(train_labels_partial)
+        test_data_a.append(test_data_partial)
+        test_labels_a.append(test_labels_partial)
+
+    train_data_a = np.vstack(train_data_a)
+    test_data_a = np.vstack(test_data_a)
+    train_labels_a = np.hstack(train_labels_a)
+    test_labels_a = np.hstack(test_labels_a)
+
+    # Target
+    assert target_file is not None, "Did not find target \""+target+"\""
+
+    train_data_b, train_labels_b, \
+    test_data_b, test_labels_b = load_single_fold(target_file, fold)
 
     return train_data_a, train_labels_a, \
         test_data_a, test_labels_a, \

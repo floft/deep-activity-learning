@@ -134,6 +134,15 @@ def load_hdf5(filename):
     """
     return h5py.File(filename, "r")
 
+# def load_hdf5_all(filename):
+#     """
+#     Load x,y data from hdf5 file -- all data, not cross validation folds
+#     """
+#     d = h5py.File(filename, "r")
+#     features = np.array(d["features"])
+#     labels = np.array(d["labels"])
+#     return features, labels
+
 def load_single_fold(filename, fold=None):
     """ Get one fold from .hdf5 dataset file """
     data = load_hdf5(filename)

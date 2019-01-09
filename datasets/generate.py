@@ -55,6 +55,37 @@ def create_windows(x, y, window_size, overlap=True):
 
     return windows_x, windows_y
 
+def process_data(x, y, window_size, overlap):
+    # Expand dimensions to be (# examples, 1, # features)
+    x = np.expand_dims(x, axis=1).astype(np.float32)
+
+    # Above we expanded to be window_size=1, so if that's the case, we're
+    # already done
+    if window_size != 1:
+        x, y = create_windows(x, y, window_size, overlap)
+
+    return x, y
+
+def cross_validation_indices(folds, x):
+    # Indices for each cross validation fold -- must recalculate since each
+    # file is a different size
+    tscv = TimeSeriesSplit(n_splits=folds)
+
+    train_indices = []
+    test_indices = []
+
+    # Train/test split before calculating windows since if overlap=True, we
+    # still don't want overlap between the train/test splits -- only within
+    # the train set and within the test set
+    for train, test in tscv.split(x):
+        train_indices.append(train)
+        test_indices.append(test)
+
+    assert len(train_indices) == len(test_indices), \
+        "Number of train/test folds must match"
+
+    return train_indices, test_indices
+
 def create_dataset(
         dir_name,
         prefix,
@@ -63,60 +94,55 @@ def create_dataset(
         seed=0,
         overlap=True,
         folds=3,
-        files=["all", "hh101", "hh102", "hh103", "hh104", "hh105", "hh117"]):
-    """
-    First dataset to try
-    """
-    paths = [(x, os.path.join(dir_name, subdir) + "/" + x + ".hdf5") for x in files]
+        files=None):
+
+    # If not specified, use all the files
+    if files is None:
+        files = pathlib.Path(os.path.join(dir_name, subdir)).glob("*.hdf5")
+        paths = [(x.stem, str(x)) for x in files]
+    else:
+        # e.g. files should be ["hh101", "hh102", ...]
+        paths = [(x, os.path.join(dir_name, subdir) + "/" + x + ".hdf5") for x in files]
 
     # For each dataset we want to create
     for name, f in paths:
         x, y = load_hdf5(f)
         assert len(x) == len(y), "Must have label for each feature vector"
 
-        # Indices for each cross validation fold -- must recalculate since each
-        # file is a different size
-        tscv = TimeSeriesSplit(n_splits=folds)
-
-        train_indices = []
-        test_indices = []
-
-        # Train/test split before calculating windows since if overlap=True, we
-        # still don't want overlap between the train/test splits -- only within
-        # the train set and within the test set
-        for train, test in tscv.split(x):
-            train_indices.append(train)
-            test_indices.append(test)
-
-        assert len(train_indices) == len(test_indices), \
-            "Number of train/test folds must match"
-
         # Output to file
         out = h5py.File(prefix+"_"+name+".hdf5", "w")
 
+        #
+        # All data -- no cross validation when doing domain adaptation, it's
+        # instead leave-one-out cross validation, where we train on multiple
+        # homes' data and then test on a different one
+        #
+        # NOTE actually we still need cross validation (and thus don't need this)
+        # since we want an estimate of both
+        #   1) on houses with labeled data, how well would AL perform after
+        #      we stop training on labeling data
+        #   2) on houses with only unlabeled data, how well would AL perform after
+        #      we stop the adaptation process (training with domain adaptation)
+        #
+        #x_all, y_all = process_data(x, y, window_size, overlap)
+        #out.create_dataset("features", data=x_all, compression="gzip")
+        #out.create_dataset("labels", data=y_all, compression="gzip")
+
+        #
+        # Split data into time-series folds with scikit-learn
+        # (see https://scikit-learn.org/stable/modules/cross_validation.html#timeseries-cv)
+        #
+        train_indices, test_indices = cross_validation_indices(folds, x)
+
         for fold in range(len(train_indices)):
+            # Do train and test sets separate to reduce memory usage
             train = train_indices[fold]
-            test = test_indices[fold]
-
-            # Expand dimensions to be (# examples, 1, # features)
-            x_train = np.expand_dims(x[train], axis=1).astype(np.float32)
-            y_train = y[train]
-
-            # Above we expanded to be window_size=1, so if that's the case, we're
-            # already done
-            if window_size != 1:
-                x_train, y_train = create_windows(x_train, y_train, window_size, overlap)
-
+            x_train, y_train = process_data(x[train], y[train], window_size, overlap)
             out.create_dataset(str(fold)+"/features_train", data=x_train, compression="gzip")
             out.create_dataset(str(fold)+"/labels_train", data=y_train, compression="gzip")
 
-            # We do train and test sets separate since this can reduce memory usage
-            x_test = np.expand_dims(x[test], axis=1).astype(np.float32)
-            y_test = y[test]
-
-            if window_size != 1:
-                x_test, y_test = create_windows(x_test, y_test, window_size, overlap)
-
+            test = test_indices[fold]
+            x_test, y_test = process_data(x[test], y[test], window_size, overlap)
             out.create_dataset(str(fold)+"/features_test", data=x_test, compression="gzip")
             out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
 

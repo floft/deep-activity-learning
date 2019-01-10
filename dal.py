@@ -851,44 +851,46 @@ if __name__ == '__main__':
         + args.flat + args.flat_da == 1, \
         "Must specify exactly one method to run"
 
+    prefix = args.target+"-"
+
     if args.lstm:
-        prefix = "lstm"
+        prefix += "lstm"
         adaptation = False
         model_func = build_lstm
     elif args.vrnn:
-        prefix = "vrnn"
+        prefix += "vrnn"
         adaptation = False
         model_func = build_vrnn
     elif args.lstm_da:
-        prefix = "lstm-da"
+        prefix += "lstm-da"
         adaptation = True
         model_func = build_lstm
     elif args.vrnn_da:
-        prefix = "vrnn-da"
+        prefix += "vrnn-da"
         adaptation = True
         model_func = build_vrnn
     elif args.cnn:
-        prefix = "cnn"
+        prefix += "cnn"
         adaptation = False
         model_func = build_cnn
     elif args.cnn_da:
-        prefix = "cnn-da"
+        prefix += "cnn-da"
         adaptation = True
         model_func = build_cnn
     elif args.tcn:
-        prefix = "tcn"
+        prefix += "tcn"
         adaptation = False
         model_func = build_tcn
     elif args.tcn_da:
-        prefix = "tcn-da"
+        prefix += "tcn-da"
         adaptation = True
         model_func = build_tcn
     elif args.flat:
-        prefix = "flat"
+        prefix += "flat"
         adaptation = False
         model_func = build_flat
     elif args.flat_da:
-        prefix = "flat-da"
+        prefix += "flat-da"
         adaptation = True
         model_func = build_flat
 

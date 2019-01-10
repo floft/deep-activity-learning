@@ -218,7 +218,7 @@ def load_data_home(feature_set="simple", dir_name="datasets", A="half1", B="hh11
         train_data_b, train_labels_b, \
         test_data_b, test_labels_b
 
-def load_data_home_da(fold, target, feature_set, dir_name="datasets"):
+def load_data_home_da(fold, target, feature_set, dir_name="preprocessing/windows"):
     """
     Concatate all dataset files (of a particular fold) together except for the
     target dataset file into domain A and only the target dataset file as

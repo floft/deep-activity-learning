@@ -68,7 +68,7 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         return parsed["x"], parsed["y"]
 
     def input_fn():
-        dataset = tf.data.TFRecordDataset(filenames)
+        dataset = tf.data.TFRecordDataset(filenames, compression_type='GZIP')
         dataset = dataset.map(_parse_function)
 
         if count: # only count, so no need to shuffle

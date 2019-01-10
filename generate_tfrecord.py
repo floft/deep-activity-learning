@@ -41,22 +41,21 @@ def write_tfrecord_config(filename, num_features, num_classes, time_steps, x_dim
 
 def process_fold(filename, fold, name, num_classes, outputs):
     data = load_hdf5(filename)
+    index_one = False # Labels start from 0
 
     train_data = np.array(data[fold]["features_train"])
     train_labels = np.array(data[fold]["labels_train"])
+    train_data, train_labels = one_hot(train_data, train_labels, num_classes, index_one)
+    train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
+    write_tfrecord(train_filename, train_data, train_labels)
+    del train_data, train_labels
+
     test_data = np.array(data[fold]["features_test"])
     test_labels = np.array(data[fold]["labels_test"])
-
-    # One-hot encoding
-    index_one = False # Labels start from 0
-    train_data, train_labels = one_hot(train_data, train_labels, num_classes, index_one)
-    test_data, test_labels = one_hot(train_data, train_labels, num_classes, index_one)
-
-    # Write to .tfrecord file
-    train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
+    test_data, test_labels = one_hot(test_data, test_labels, num_classes, index_one)
     test_filename = os.path.join(outputs, name+"_test_"+fold+".tfrecord")
-    write_tfrecord(train_filename, train_data, train_labels)
     write_tfrecord(test_filename, test_data, test_labels)
+    del test_data, test_labels
 
 def generate_config(feature_set, inputs="preprocessing/windows",
         outputs="datasets", fold=0):

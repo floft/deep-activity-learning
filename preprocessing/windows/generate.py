@@ -59,6 +59,40 @@ def create_windows(x, y, window_size, overlap=True):
 
     return windows_x, windows_y
 
+def create_windows_x(x, window_size, overlap=True):
+    """ create_windows but only processing x (saves memory) """
+    windows_x = []
+    i = 0
+
+    while i < len(x)-window_size:
+        window_x = np.expand_dims(np.concatenate(x[i:i+window_size], axis=0), axis=0)
+        windows_x.append(window_x)
+
+        # Where to start the next window
+        if overlap:
+            i += 1
+        else:
+            i += window_size
+
+    return np.vstack(windows_x)
+
+def create_windows_y(y, window_size, overlap=True):
+    """ create_windows but only processing y (saves memory) """
+    windows_y = []
+    i = 0
+
+    while i < len(y)-window_size:
+        window_y = y[i+window_size-1]
+        windows_y.append(window_y)
+
+        # Where to start the next window
+        if overlap:
+            i += 1
+        else:
+            i += window_size
+
+    return np.hstack(windows_y)
+
 def process_data(x, y, window_size, overlap):
     # Expand dimensions to be (# examples, 1, # features)
     x = np.expand_dims(x, axis=1).astype(np.float32)
@@ -69,6 +103,20 @@ def process_data(x, y, window_size, overlap):
         x, y = create_windows(x, y, window_size, overlap)
 
     return x, y
+
+def process_data_x(x, window_size, overlap):
+    x = np.expand_dims(x, axis=1).astype(np.float32)
+
+    if window_size != 1:
+        x = create_windows_x(x, window_size, overlap)
+
+    return x
+
+def process_data_y(y, window_size, overlap):
+    if window_size != 1:
+        y = create_windows_y(y, window_size, overlap)
+
+    return y
 
 def cross_validation_indices(folds, x):
     # Indices for each cross validation fold -- must recalculate since each
@@ -120,16 +168,26 @@ def process_dataset(prefix, folds, name, f, window_size, overlap):
     train_indices, test_indices = cross_validation_indices(folds, x)
 
     for fold in range(len(train_indices)):
-        # Do train and test sets separate to reduce memory usage
+        # Do train and test sets and x and y separately to reduce memory usage
         train = train_indices[fold]
-        x_train, y_train = process_data(x[train], y[train], window_size, overlap)
+
+        x_train = process_data_x(x[train], window_size, overlap)
         out.create_dataset(str(fold)+"/features_train", data=x_train, compression="gzip")
+        del x_train
+
+        y_train = process_data_y(y[train], window_size, overlap)
         out.create_dataset(str(fold)+"/labels_train", data=y_train, compression="gzip")
+        del y_train
 
         test = test_indices[fold]
-        x_test, y_test = process_data(x[test], y[test], window_size, overlap)
+
+        x_test = process_data_x(x[test], window_size, overlap)
         out.create_dataset(str(fold)+"/features_test", data=x_test, compression="gzip")
+        del x_test
+
+        y_test = process_data_y(y[test], window_size, overlap)
         out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
+        del y_test
 
 def create_dataset(
         dir_name,

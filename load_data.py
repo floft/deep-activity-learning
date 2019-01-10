@@ -24,8 +24,8 @@ class IteratorInitializerHook(tf.train.SessionRunHook):
         """Initialize the iterator after the session has been created."""
         self.iter_init_func(sess)
 
-def _get_input_fn(features, labels, batch_size, evaluation=False, buffer_size=5000,
-    eval_shuffle_seed=0):
+def _get_input_fn(features, labels, batch_size,
+        evaluation=False, buffer_size=200000, eval_shuffle_seed=0):
     """ Load data from numpy arrays (requires more memory but less disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -50,32 +50,32 @@ def _get_input_fn(features, labels, batch_size, evaluation=False, buffer_size=50
         return next_data_batch, next_label_batch
     return input_fn, iter_init_hook
 
-def _get_tfrecord_input_fn(filenames, batch_size, x_dims, evaluation=False, buffer_size=5000,
-    eval_shuffle_seed=0):
+def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
+        evaluation=False, count=False, buffer_size=200000, eval_shuffle_seed=0):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 
     # Create a description of the features
     # See: https://www.tensorflow.org/tutorials/load_data/tf-records
     feature_description = {
-        'x': tf.FixedLenFeature([], tf.float32, default_value=0),
-        'y': tf.FixedLenFeature([], tf.float32, default_value=0),
+        'x': tf.FixedLenFeature(x_dims, tf.float32),
+        'y': tf.FixedLenFeature([num_classes], tf.float32),
     }
 
     def _parse_function(example_proto):
         # Parse the input tf.Example proto using the dictionary above.
         parsed = tf.parse_single_example(example_proto, feature_description)
-        x = tf.reshape(parsed["x"], x_dims)
-        y = parsed["y"]
-        return x, y
+        return parsed["x"], parsed["y"]
 
     def input_fn():
         dataset = tf.data.TFRecordDataset(filenames)
         dataset = dataset.map(_parse_function)
 
-        if evaluation:
+        if count: # only count, so no need to shuffle
+            dataset = dataset.batch(batch_size)
+        elif evaluation: # don't repeat since we want to evaluate entire set
             dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
-        else:
+        else: # repeat, shuffle, and batch
             dataset = dataset.repeat().shuffle(buffer_size).batch(batch_size)
 
         iterator = dataset.make_initializable_iterator()
@@ -301,6 +301,50 @@ def get_tfrecord_datasets(feature_set, target, fold, dir_name="datasets"):
     return tfrecords_train_a, tfrecords_train_b, \
         tfrecords_test_a, tfrecords_test_b
 
+def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
+        batch_size=1000000):
+    # Since we're using a .tfrecord file, we need to load the data and sum
+    # how many instances of each class there are in batches
+    input_fn, input_hook = _get_tfrecord_input_fn(
+        filenames, batch_size, x_dims, num_classes, count=True)
+    _, next_labels_batch = input_fn()
+
+    total = 0
+    counts = np.zeros((num_classes,), dtype=np.int32)
+
+    # Increment total by number of examples in each batch
+    increment_total = tf.shape(next_labels_batch)[0]
+
+    # Since the labels are one-hot encoded, we can add it to the counts
+    # directly. For example, if we have 3 classes, our counts start out
+    # as [0 0 0], and if we have an example of class 0, i.e. [1 0 0],
+    # if we do [0 0 0]+[1 0 0]=[1 0 0], i.e. we've seen one instance of
+    # class 0 now.
+    # Note: first sum over examples, then we'll add this to "counts"
+    increment_counts = tf.reduce_sum(tf.cast(next_labels_batch, tf.int32), axis=0)
+
+    # Run on CPU since such a simple computation
+    #config=tf.ConfigProto(device_count={'GPU': 0})
+    with tf.train.SingularMonitoredSession(hooks=[input_hook]) as sess:
+        # Continue till we've looked at all the data
+        while True:
+            try:
+                inc_total, inc_counts = sess.run([increment_total, increment_counts])
+            except tf.errors.OutOfRangeError:
+                break
+
+            total += inc_total
+            counts += inc_counts
+
+    # We only created a graph here to look through the data, but we don't want to
+    # mess up the actual graph we'll use from this point on
+    tf.reset_default_graph()
+
+    class_weights = np.power(total/counts, balance_pow)
+    print("Class weights:", class_weights)
+
+    return class_weights
+
 class ALConfig:
     """
     Load an al.config file to get the label and feature names
@@ -352,6 +396,7 @@ class TFRecordConfig:
     def __init__(self, feature_set, dir_name="datasets"):
         """ Gets the possible features and labels """
         self.num_features = None
+        self.num_classes = None
         self.time_steps = None
         self.x_dims = None
 
@@ -361,15 +406,19 @@ class TFRecordConfig:
 
                 if len(items) > 0:
                     if items[0] == "x_dims":
-                        self.x_dims = items[1:]
+                        self.x_dims = [int(x) for x in items[1:]]
                         assert len(items) == 3, "format: x_dims int int"
                     elif items[0] == "num_features":
-                        self.num_features = items[1]
+                        self.num_features = int(items[1])
                         assert len(items) == 2, "format: num_features int"
+                    elif items[0] == "num_classes":
+                        self.num_classes = int(items[1])
+                        assert len(items) == 2, "format: num_classes int"
                     elif items[0] == "time_steps":
-                        self.time_steps = items[1]
+                        self.time_steps = int(items[1])
                         assert len(items) == 2, "format: time_steps int"
 
-        assert self.num_features is not None, "no \"x_dims\" in .config"
+        assert self.num_features is not None, "no \"num_features\" in .config"
+        assert self.num_classes is not None, "no \"num_classes\" in .config"
         assert self.time_steps is not None, "no \"time_steps\" in .config"
         assert self.x_dims is not None, "no \"x_dims\" in .config"

@@ -23,7 +23,8 @@ import matplotlib.pyplot as plt
 from plot import plot_embedding, plot_random_time_series, plot_real_time_series
 from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat
 from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
-    domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig
+    domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
+    calc_class_weights
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -386,21 +387,21 @@ def train(
     # Input training data
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_train_a, batch_size, x_dims)
+            tfrecords_train_a, batch_size, x_dims, num_classes)
         next_data_batch_a, next_labels_batch_a = input_fn_a()
     with tf.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_train_b, batch_size, x_dims)
+            tfrecords_train_b, batch_size, x_dims, num_classes)
         next_data_batch_b, next_labels_batch_b = input_fn_b()
 
     # Load all the test data in one batch (we'll assume test set is small for now)
     with tf.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_test_a, batch_size, x_dims, evaluation=True)
+            tfrecords_test_a, batch_size, x_dims, num_classes, evaluation=True)
         next_data_batch_test_a, next_labels_batch_test_a = eval_input_fn_a()
     with tf.variable_scope("evaluation_data_b"):
         eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_test_b, batch_size, x_dims, evaluation=True)
+            tfrecords_test_b, batch_size, x_dims, num_classes, evaluation=True)
         next_data_batch_test_b, next_labels_batch_test_b = eval_input_fn_b()
 
     # Inputs
@@ -800,6 +801,12 @@ if __name__ == '__main__':
         help="Max number of examples to evaluate for validation (default 5000)")
     parser.add_argument('--max-plot-examples', default=100, type=int,
         help="Max number of examples to use for plotting (default 100)")
+    parser.add_argument('--balance', dest='balance', action='store_true',
+        help="On high class imbalances weight the loss function (default)")
+    parser.add_argument('--no-balance', dest='balance', action='store_false',
+        help="Do not weight loss function with high class imbalances")
+    parser.add_argument('--balance-pow', default=1.0, type=float,
+        help="For increased balancing, raise weights to a specified power (default 1.0)")
     parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
         help="Use a bidirectional RNN (when selected method includes an RNN)")
     parser.add_argument('--no-bidirectional', dest='bidirectional', action='store_false',
@@ -816,23 +823,27 @@ if __name__ == '__main__':
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
         lstm_da=False, vrnn_da=False, cnn_da=False, tcn_da=False, flat_da=False,
-        bidirectional=False, feature_extractor=True, debug=False)
+        balance=True, bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
     # Load datasets
     al_config = ALConfig()
     tfrecord_config = TFRecordConfig(args.features)
+    assert len(al_config.labels) == tfrecord_config.num_classes, \
+        "al.config and tfrecord config disagree on the number of classes: " \
+        +str(len(al_config.labels))+" vs. "+str(tfrecord_config.num_classes)
 
     tfrecords_train_a, tfrecords_train_b, \
     tfrecords_test_a, tfrecords_test_b = \
         get_tfrecord_datasets(args.features, args.target, args.fold)
 
-    print("num_features:", tfrecord_config.num_features)
-    print("num_classes:", tfrecord_config.num_classes)
-    print("x_dims:", tfrecord_config.x_dims)
-    print("A:", tfrecords_train_a, tfrecords_test_a)
-    print("B:", tfrecords_train_b, tfrecords_test_b)
-    exit()
+    # Calculate class imbalance using labeled training data (i.e. from domain A)
+    if args.balance:
+        class_weights = calc_class_weights(tfrecords_train_a,
+            tfrecord_config.x_dims, tfrecord_config.num_classes,
+            args.balance_pow)
+    else:
+        class_weights = 1.0
 
     # Train with desired method
     assert args.lstm + args.vrnn + args.lstm_da + args.vrnn_da \
@@ -926,6 +937,6 @@ if __name__ == '__main__':
             log_extra_save_steps=args.log_steps_extra,
             multi_class=False,
             bidirectional=args.bidirectional,
-            class_weights=1.0,
+            class_weights=class_weights,
             max_examples=args.max_examples,
             max_plot_examples=args.max_plot_examples)

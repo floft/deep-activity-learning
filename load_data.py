@@ -50,13 +50,28 @@ def _get_input_fn(features, labels, batch_size, evaluation=False, buffer_size=50
         return next_data_batch, next_label_batch
     return input_fn, iter_init_hook
 
-def _get_tfrecord_input_fn(filenames, batch_size, evaluation=False, buffer_size=5000,
+def _get_tfrecord_input_fn(filenames, batch_size, x_dims, evaluation=False, buffer_size=5000,
     eval_shuffle_seed=0):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 
+    # Create a description of the features
+    # See: https://www.tensorflow.org/tutorials/load_data/tf-records
+    feature_description = {
+        'x': tf.FixedLenFeature([], tf.float32, default_value=0),
+        'y': tf.FixedLenFeature([], tf.float32, default_value=0),
+    }
+
+    def _parse_function(example_proto):
+        # Parse the input tf.Example proto using the dictionary above.
+        parsed = tf.parse_single_example(example_proto, feature_description)
+        x = tf.reshape(parsed["x"], x_dims)
+        y = parsed["y"]
+        return x, y
+
     def input_fn():
         dataset = tf.data.TFRecordDataset(filenames)
+        dataset = dataset.map(_parse_function)
 
         if evaluation:
             dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
@@ -253,7 +268,40 @@ def load_data_home_da(fold, target, feature_set, dir_name="datasets"):
         train_data_b, train_labels_b, \
         test_data_b, test_labels_b
 
-class Config:
+def get_tfrecord_traintest_datasets(feature_set, target, fold, dataset, dir_name="datasets"):
+    """ Get all the train sets or test sets (dataset="train" or dataset="test") """
+    files = pathlib.Path(dir_name).glob(feature_set+"_*_"+dataset+"_"+str(fold)+".tfrecord")
+    paths = [(x.stem, str(x)) for x in files]
+    target_file = None
+    tfrecords_a = []
+    tfrecords_b = []
+
+    # Source(s) -- all except target
+    for name, f in paths:
+        # Skip target for now
+        if name == feature_set+"_"+target+"_"+dataset+"_"+str(fold):
+            target_file = f
+            continue
+
+        tfrecords_a.append(f)
+
+    # Target
+    assert target_file is not None, "Did not find target \""+target+"\""
+    tfrecords_b.append(target_file)
+
+    return tfrecords_a, tfrecords_b
+
+def get_tfrecord_datasets(feature_set, target, fold, dir_name="datasets"):
+    """ Get all the train/test A/B .tfrecord files """
+    tfrecords_train_a, tfrecords_train_b = \
+        get_tfrecord_traintest_datasets(feature_set, target, fold, "train", dir_name)
+    tfrecords_test_a, tfrecords_test_b = \
+        get_tfrecord_traintest_datasets(feature_set, target, fold, "test", dir_name)
+
+    return tfrecords_train_a, tfrecords_train_b, \
+        tfrecords_test_a, tfrecords_test_b
+
+class ALConfig:
     """
     Load an al.config file to get the label and feature names
 
@@ -296,3 +344,32 @@ class Config:
     def int_to_feature(self, feature_index):
         """ e.g. Bathroom to 0 """
         return self.features[feature_index]
+
+class TFRecordConfig:
+    """
+    Load an {simple,al}.config file to get the x dimensions for reshaping
+    """
+    def __init__(self, feature_set, dir_name="datasets"):
+        """ Gets the possible features and labels """
+        self.num_features = None
+        self.time_steps = None
+        self.x_dims = None
+
+        with open(os.path.join(dir_name, feature_set+".config"), 'r') as f:
+            for line in f:
+                items = line.strip().split(' ')
+
+                if len(items) > 0:
+                    if items[0] == "x_dims":
+                        self.x_dims = items[1:]
+                        assert len(items) == 3, "format: x_dims int int"
+                    elif items[0] == "num_features":
+                        self.num_features = items[1]
+                        assert len(items) == 2, "format: num_features int"
+                    elif items[0] == "time_steps":
+                        self.time_steps = items[1]
+                        assert len(items) == 2, "format: time_steps int"
+
+        assert self.num_features is not None, "no \"x_dims\" in .config"
+        assert self.time_steps is not None, "no \"time_steps\" in .config"
+        assert self.x_dims is not None, "no \"x_dims\" in .config"

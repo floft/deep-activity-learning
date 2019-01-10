@@ -22,8 +22,8 @@ import matplotlib.pyplot as plt
 
 from plot import plot_embedding, plot_random_time_series, plot_real_time_series
 from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat
-from load_data import IteratorInitializerHook, _get_input_fn, \
-    one_hot, domain_labels, load_data_home_da, Config
+from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
+    domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -347,8 +347,8 @@ def opt_with_summ(optimizer, loss, var_list=None):
 
 def train(
         num_features, num_classes, x_dims,
-        features_a, labels_a, test_features_a, test_labels_a,
-        features_b, labels_b, test_features_b, test_labels_b,
+        tfrecords_train_a, tfrecords_train_b,
+        tfrecords_test_a, tfrecords_test_b,
         config,
         model_func=build_lstm,
         batch_size=2048,
@@ -385,20 +385,22 @@ def train(
 
     # Input training data
     with tf.variable_scope("training_data_a"):
-        input_fn_a, input_hook_a = _get_input_fn(features_a, labels_a, batch_size)
+        input_fn_a, input_hook_a = _get_tfrecord_input_fn(
+            tfrecords_train_a, batch_size, x_dims)
         next_data_batch_a, next_labels_batch_a = input_fn_a()
     with tf.variable_scope("training_data_b"):
-        input_fn_b, input_hook_b = _get_input_fn(features_b, labels_b, batch_size)
+        input_fn_b, input_hook_b = _get_tfrecord_input_fn(
+            tfrecords_train_b, batch_size, x_dims)
         next_data_batch_b, next_labels_batch_b = input_fn_b()
 
     # Load all the test data in one batch (we'll assume test set is small for now)
     with tf.variable_scope("evaluation_data_a"):
-        eval_input_fn_a, eval_input_hook_a = _get_input_fn(
-                test_features_a, test_labels_a, batch_size, evaluation=True)
+        eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
+            tfrecords_test_a, batch_size, x_dims, evaluation=True)
         next_data_batch_test_a, next_labels_batch_test_a = eval_input_fn_a()
     with tf.variable_scope("evaluation_data_b"):
-        eval_input_fn_b, eval_input_hook_b = _get_input_fn(
-                test_features_b, test_labels_b, batch_size, evaluation=True)
+        eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
+            tfrecords_test_b, batch_size, x_dims, evaluation=True)
         next_data_batch_test_b, next_labels_batch_test_b = eval_input_fn_b()
 
     # Inputs
@@ -768,10 +770,6 @@ if __name__ == '__main__':
         help="Use flat-DA model")
     parser.add_argument('--no-flat-da', dest='flat_da', action='store_false',
         help="Do not use flat-DA model (default)")
-    parser.add_argument('--home', dest='home', action='store_true',
-        help="Run on the smart home dataset (default)")
-    parser.add_argument('--no-home', dest='home', action='store_false',
-        help="Do not run on the smart home dataset")
     parser.add_argument('--fold', default=0, type=int,
         help="What fold to use from the dataset files (default fold 0)")
     parser.add_argument('--target', default="hh101", type=str,
@@ -802,12 +800,6 @@ if __name__ == '__main__':
         help="Max number of examples to evaluate for validation (default 5000)")
     parser.add_argument('--max-plot-examples', default=100, type=int,
         help="Max number of examples to use for plotting (default 100)")
-    parser.add_argument('--balance', dest='balance', action='store_true',
-        help="On high class imbalances weight the loss function (default)")
-    parser.add_argument('--no-balance', dest='balance', action='store_false',
-        help="Do not weight loss function with high class imbalances")
-    parser.add_argument('--balance-pow', default=1.0, type=float,
-        help="For increased balancing, raise weights to a specified power (default 1.0)")
     parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
         help="Use a bidirectional RNN (when selected method includes an RNN)")
     parser.add_argument('--no-bidirectional', dest='bidirectional', action='store_false',
@@ -824,50 +816,25 @@ if __name__ == '__main__':
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
         lstm_da=False, vrnn_da=False, cnn_da=False, tcn_da=False, flat_da=False,
-        home=True, balance=True,
         bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
-    # Load datasets - domains A & B
-    assert args.home == 1, \
-        "Must specify exactly one dataset to use"
+    # Load datasets
+    al_config = ALConfig()
+    tfrecord_config = TFRecordConfig(args.features)
 
-    if args.home:
-        train_data_a, train_labels_a, \
-        test_data_a, test_labels_a, \
-        train_data_b, train_labels_b, \
-        test_data_b, test_labels_b = load_data_home_da(args.fold, args.target, args.features)
+    tfrecords_train_a, tfrecords_train_b, \
+    tfrecords_test_a, tfrecords_test_b = \
+        get_tfrecord_datasets(args.features, args.target, args.fold)
 
-        # Information about dataset
-        index_one = False # Labels start from 0
-        num_features = train_data_a.shape[2]
-        time_steps = train_data_a.shape[1]
-        num_classes = int(np.max(train_labels_a)+1) # it's in [0, ..., |classes|-1]
-        multi_class = False # Predict only one class
-        class_weights = 1.0 # TODO check if balanced
+    print("num_features:", tfrecord_config.num_features)
+    print("num_classes:", tfrecord_config.num_classes)
+    print("x_dims:", tfrecord_config.x_dims)
+    print("A:", tfrecords_train_a, tfrecords_test_a)
+    print("B:", tfrecords_train_b, tfrecords_test_b)
+    exit()
 
-        # Due to the large class imbalance, we should weight the + class more
-        # e.g. 1/(counts/len) if power is 1
-        #class_weights = np.power(len(train_labels_a)/counts, args.balance_pow)
-
-    # If we disabled balancing, set class_weights to 1
-    if not args.balance:
-        class_weights = 1.0
-
-    # For image data, it's pixels x pixels x channels, e.g. [32,32,3]
-    if args.cnn or args.cnn_da:
-        x_dims = list(train_data_a.shape[1:])
-    # For time-series data, it's time steps x number of features
-    else:
-        x_dims = [time_steps, num_features]
-
-    # One-hot encoding
-    train_data_a, train_labels_a = one_hot(train_data_a, train_labels_a, num_classes, index_one)
-    test_data_a, test_labels_a = one_hot(test_data_a, test_labels_a, num_classes, index_one)
-    train_data_b, train_labels_b = one_hot(train_data_b, train_labels_b, num_classes, index_one)
-    test_data_b, test_labels_b = one_hot(test_data_b, test_labels_b, num_classes, index_one)
-
-    # Train model using selected dataset and method
+    # Train with desired method
     assert args.lstm + args.vrnn + args.lstm_da + args.vrnn_da \
         + args.cnn + args.cnn_da + args.tcn + args.tcn_da \
         + args.flat + args.flat_da == 1, \
@@ -936,10 +903,12 @@ if __name__ == '__main__':
         model_dir = args.modeldir
         log_dir = args.logdir
 
-    train(num_features, num_classes, x_dims,
-            train_data_a, train_labels_a, test_data_a, test_labels_a,
-            train_data_b, train_labels_b, test_data_b, test_labels_b,
-            Config(),
+    train(tfrecord_config.num_features,
+            tfrecord_config.num_classes,
+            tfrecord_config.x_dims,
+            tfrecords_train_a, tfrecords_train_b,
+            tfrecords_test_a, tfrecords_test_b,
+            al_config,
             model_func=model_func,
             model_dir=model_dir,
             log_dir=log_dir,
@@ -955,8 +924,8 @@ if __name__ == '__main__':
             log_save_steps=args.log_steps,
             log_validation_accuracy_steps=args.log_steps_val,
             log_extra_save_steps=args.log_steps_extra,
-            multi_class=multi_class,
+            multi_class=False,
             bidirectional=args.bidirectional,
-            class_weights=class_weights,
+            class_weights=1.0,
             max_examples=args.max_examples,
             max_plot_examples=args.max_plot_examples)

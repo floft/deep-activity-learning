@@ -12,7 +12,8 @@ cd ../al-features
 cd ../simple-features
 ./export_data.sh ../translated/*/*.txt
 
-cd ../../datasets
+cd ../windows
 python3 generate.py
 
-cd ..
+cd ../../
+python3 generate_tfrecord.py

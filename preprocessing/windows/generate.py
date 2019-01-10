@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate the cross validation folds on the various datasets
+Generate the cross validation folds on the various files
 """
 import os
 import sys
@@ -147,7 +147,7 @@ def create_dataset(
             out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
 
 if __name__ == "__main__":
-    create_dataset("../preprocessing/al-features", "al",
+    create_dataset("../al-features", "al",
         window_size=1) # each uses window of size 30
-    create_dataset("../preprocessing/simple-features", "simple",
+    create_dataset("../simple-features", "simple",
         window_size=30)

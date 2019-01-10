@@ -1,6 +1,7 @@
 # Datasets
 *.txt
 *.hdf5
+*.tfrecord
 
 # Python
 *.pyc

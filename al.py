@@ -78,7 +78,14 @@ if __name__ == "__main__":
     #
     folds = 3
     feature_set = "al"
-    targets = ["hh101", "hh102", "hh103"]
+    targets = [
+        "hh101", "hh102", "hh103", "hh104", "hh105",
+        "hh106", "hh108", "hh109", "hh110", "hh111",
+        "hh112", "hh113", "hh114", "hh115", "hh116",
+        "hh117", "hh118", "hh119", "hh120", "hh122",
+        "hh123", "hh124", "hh125", "hh126", "hh127",
+        "hh128", "hh129", "hh130"
+    ]
 
     for target in targets:
         train_results_a = []

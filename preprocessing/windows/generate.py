@@ -10,6 +10,10 @@ import numpy as np
 
 from sklearn.model_selection import TimeSeriesSplit
 
+# Hack to import from ../../pool.py
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+from pool import run_job_pool
+
 def load_hdf5(filename):
     """
     Load x,y data from hdf5 file
@@ -86,6 +90,47 @@ def cross_validation_indices(folds, x):
 
     return train_indices, test_indices
 
+def process_dataset(prefix, folds, name, f, window_size, overlap):
+    x, y = load_hdf5(f)
+    assert len(x) == len(y), "Must have label for each feature vector"
+
+    # Output to file
+    out = h5py.File(prefix+"_"+name+".hdf5", "w")
+
+    #
+    # All data -- no cross validation when doing domain adaptation, it's
+    # instead leave-one-out cross validation, where we train on multiple
+    # homes' data and then test on a different one
+    #
+    # NOTE actually we still need cross validation (and thus don't need this)
+    # since we want an estimate of both
+    #   1) on houses with labeled data, how well would AL perform after
+    #      we stop training on labeling data
+    #   2) on houses with only unlabeled data, how well would AL perform after
+    #      we stop the adaptation process (training with domain adaptation)
+    #
+    #x_all, y_all = process_data(x, y, window_size, overlap)
+    #out.create_dataset("features", data=x_all, compression="gzip")
+    #out.create_dataset("labels", data=y_all, compression="gzip")
+
+    #
+    # Split data into time-series folds with scikit-learn
+    # (see https://scikit-learn.org/stable/modules/cross_validation.html#timeseries-cv)
+    #
+    train_indices, test_indices = cross_validation_indices(folds, x)
+
+    for fold in range(len(train_indices)):
+        # Do train and test sets separate to reduce memory usage
+        train = train_indices[fold]
+        x_train, y_train = process_data(x[train], y[train], window_size, overlap)
+        out.create_dataset(str(fold)+"/features_train", data=x_train, compression="gzip")
+        out.create_dataset(str(fold)+"/labels_train", data=y_train, compression="gzip")
+
+        test = test_indices[fold]
+        x_test, y_test = process_data(x[test], y[test], window_size, overlap)
+        out.create_dataset(str(fold)+"/features_test", data=x_test, compression="gzip")
+        out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
+
 def create_dataset(
         dir_name,
         prefix,
@@ -105,49 +150,17 @@ def create_dataset(
         paths = [(x, os.path.join(dir_name, subdir) + "/" + x + ".hdf5") for x in files]
 
     # For each dataset we want to create
+    commands = []
     for name, f in paths:
-        x, y = load_hdf5(f)
-        assert len(x) == len(y), "Must have label for each feature vector"
+        commands.append((prefix, folds, name, f, window_size, overlap))
 
-        # Output to file
-        out = h5py.File(prefix+"_"+name+".hdf5", "w")
-
-        #
-        # All data -- no cross validation when doing domain adaptation, it's
-        # instead leave-one-out cross validation, where we train on multiple
-        # homes' data and then test on a different one
-        #
-        # NOTE actually we still need cross validation (and thus don't need this)
-        # since we want an estimate of both
-        #   1) on houses with labeled data, how well would AL perform after
-        #      we stop training on labeling data
-        #   2) on houses with only unlabeled data, how well would AL perform after
-        #      we stop the adaptation process (training with domain adaptation)
-        #
-        #x_all, y_all = process_data(x, y, window_size, overlap)
-        #out.create_dataset("features", data=x_all, compression="gzip")
-        #out.create_dataset("labels", data=y_all, compression="gzip")
-
-        #
-        # Split data into time-series folds with scikit-learn
-        # (see https://scikit-learn.org/stable/modules/cross_validation.html#timeseries-cv)
-        #
-        train_indices, test_indices = cross_validation_indices(folds, x)
-
-        for fold in range(len(train_indices)):
-            # Do train and test sets separate to reduce memory usage
-            train = train_indices[fold]
-            x_train, y_train = process_data(x[train], y[train], window_size, overlap)
-            out.create_dataset(str(fold)+"/features_train", data=x_train, compression="gzip")
-            out.create_dataset(str(fold)+"/labels_train", data=y_train, compression="gzip")
-
-            test = test_indices[fold]
-            x_test, y_test = process_data(x[test], y[test], window_size, overlap)
-            out.create_dataset(str(fold)+"/features_test", data=x_test, compression="gzip")
-            out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
+    # Run
+    run_job_pool(process_dataset, commands, desc=prefix)
 
 if __name__ == "__main__":
     create_dataset("../al-features", "al",
         window_size=1) # each uses window of size 30
+    #create_dataset("../simple-features", "simple",
+    #    window_size=30)
     create_dataset("../simple-features", "simple",
-        window_size=30)
+        window_size=100)

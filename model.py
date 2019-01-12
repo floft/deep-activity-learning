@@ -67,7 +67,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
     Also returns sigmoid output for if doing multi-class classification.
     """
     classifier_output = x
-    num_layers = 4
+    num_layers = 2
 
     for i in range(num_layers):
         with tf.variable_scope("layer_"+str(i)):
@@ -75,7 +75,8 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
             if i == num_layers-1:
                 num_features = num_classes
             else:
-                num_features = 50
+                #num_features = 50
+                num_features = 20
 
             classifier_output = tf.contrib.layers.fully_connected(
                     classifier_output, num_features, activation_fn=None)
@@ -96,7 +97,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
 
 def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_classes, adaptation=True, multi_class=False, class_weights=1.0,
-        batch_norm=False, two_domain_classifiers=False, log_outputs=True,
+        batch_norm=True, two_domain_classifiers=False, log_outputs=True,
         use_grl=True, use_feature_extractor=True):
     """
     Creates the feature extractor, task classifier, domain classifier
@@ -127,12 +128,15 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_layers = 0
 
         if use_feature_extractor:
-            num_layers = 3
+            #num_layers = 3
+            num_layers = 1
 
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):
+                #feature_extractor = tf.contrib.layers.fully_connected(
+                #    feature_extractor, 100, activation_fn=None)
                 feature_extractor = tf.contrib.layers.fully_connected(
-                    feature_extractor, 100, activation_fn=None)
+                    feature_extractor, 20, activation_fn=None)
                 feature_extractor = tf.nn.dropout(feature_extractor, keep_prob)
 
                 if batch_norm:

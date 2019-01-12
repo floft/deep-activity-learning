@@ -13,7 +13,7 @@ import numpy as np
 import tensorflow as tf
 
 from pool import run_job_pool
-from load_data import one_hot, load_hdf5, ALConfig
+from load_data import one_hot, load_hdf5, ALConfig, shuffle_together_calc
 
 def create_tf_example(x, y):
     tf_example = tf.train.Example(features=tf.train.Features(feature={
@@ -39,23 +39,43 @@ def write_tfrecord_config(filename, num_features, num_classes, time_steps, x_dim
         f.write("time_steps "+str(time_steps)+"\n")
         f.write("x_dims "+" ".join([str(x) for x in x_dims])+"\n")
 
-def process_fold(filename, fold, name, num_classes, outputs):
+def process_fold(filename, fold, name, num_classes, outputs, seed):
     data = load_hdf5(filename)
     index_one = False # Labels start from 0
 
+    #
+    # Train data
+    #
     train_data = np.array(data[fold]["features_train"])
     train_labels = np.array(data[fold]["labels_train"])
+
     train_data, train_labels = one_hot(train_data, train_labels, num_classes, index_one)
+
+    p = shuffle_together_calc(len(train_labels), seed=seed)
+    train_data = train_data[p]
+    train_labels = train_labels[p]
+
     train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
     write_tfrecord(train_filename, train_data, train_labels)
-    del train_data, train_labels
 
+    del p, train_data, train_labels
+
+    #
+    # Test data
+    #
     test_data = np.array(data[fold]["features_test"])
     test_labels = np.array(data[fold]["labels_test"])
+
     test_data, test_labels = one_hot(test_data, test_labels, num_classes, index_one)
+
+    p = shuffle_together_calc(len(test_labels), seed=seed+1)
+    test_data = test_data[p]
+    test_labels = test_labels[p]
+
     test_filename = os.path.join(outputs, name+"_test_"+fold+".tfrecord")
     write_tfrecord(test_filename, test_data, test_labels)
-    del test_data, test_labels
+
+    del p, test_data, test_labels, data
 
 def generate_config(feature_set, inputs="preprocessing/windows",
         outputs="datasets", fold=0):
@@ -97,17 +117,21 @@ def generate_tfrecords(inputs="preprocessing/windows",
 
     # Get all files and folds
     commands = []
+    seed = 0
 
     for name, f in paths:
         data = load_hdf5(f)
 
         for fold in data.keys():
-            commands.append((f, fold, name, num_classes, outputs))
+            commands.append((f, fold, name, num_classes, outputs, seed))
+            seed += 2
 
     # Process them all
+    # Note: set cores=1 because otherwise I run out of memory running this
     run_job_pool(process_fold, commands)
+    #run_job_pool(process_fold, commands, cores=1)
 
 if __name__ == "__main__":
     generate_config("al")
-    generate_config("simple")
+    #generate_config("simple")
     generate_tfrecords()

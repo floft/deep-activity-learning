@@ -25,7 +25,7 @@ class IteratorInitializerHook(tf.train.SessionRunHook):
         self.iter_init_func(sess)
 
 def _get_input_fn(features, labels, batch_size,
-        evaluation=False, buffer_size=200000, eval_shuffle_seed=0):
+        evaluation=False, buffer_size=10000, eval_shuffle_seed=0):
     """ Load data from numpy arrays (requires more memory but less disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -38,7 +38,7 @@ def _get_input_fn(features, labels, batch_size,
         if evaluation:
             dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
         else:
-            dataset = dataset.repeat().shuffle(buffer_size).batch(batch_size)
+            dataset = dataset.shuffle(buffer_size).repeat().batch(batch_size)
 
         iterator = dataset.make_initializable_iterator()
         next_data_batch, next_label_batch = iterator.get_next()
@@ -51,7 +51,7 @@ def _get_input_fn(features, labels, batch_size,
     return input_fn, iter_init_hook
 
 def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
-        evaluation=False, count=False, buffer_size=200000, eval_shuffle_seed=0):
+        evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -76,7 +76,7 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         elif evaluation: # don't repeat since we want to evaluate entire set
             dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
         else: # repeat, shuffle, and batch
-            dataset = dataset.repeat().shuffle(buffer_size).batch(batch_size)
+            dataset = dataset.shuffle(buffer_size).repeat().batch(batch_size)
 
         iterator = dataset.make_initializable_iterator()
         next_data_batch, next_label_batch = iterator.get_next()
@@ -145,6 +145,12 @@ def shuffle_together_np(a, b, seed=None):
     rand = np.random.RandomState(seed)
     p = rand.permutation(len(a))
     return a[p], b[p]
+
+def shuffle_together_calc(length, seed=None):
+    """ Generate indices of numpy array shuffling, then do x[p] """
+    rand = np.random.RandomState(seed)
+    p = rand.permutation(length)
+    return p
 
 def load_hdf5_full(filename):
     """

@@ -106,13 +106,13 @@ def generate_config(feature_set, inputs="preprocessing/windows",
         num_features, num_classes, time_steps, x_dims)
 
 def generate_tfrecords(inputs="preprocessing/windows",
-        outputs="datasets"):
+        outputs="datasets", prefix="*"):
     # Get number of classes
     config = ALConfig()
     num_classes = len(config.labels)
 
     # Get list of all the datasets
-    files = pathlib.Path(inputs).glob("*_*.hdf5")
+    files = pathlib.Path(inputs).glob(prefix+"_*.hdf5")
     paths = [(x.stem, str(x)) for x in files]
 
     # Get all files and folds
@@ -127,11 +127,10 @@ def generate_tfrecords(inputs="preprocessing/windows",
             seed += 2
 
     # Process them all
-    # Note: set cores=1 because otherwise I run out of memory running this
     run_job_pool(process_fold, commands)
-    #run_job_pool(process_fold, commands, cores=1)
 
 if __name__ == "__main__":
     generate_config("al")
-    #generate_config("simple")
+    generate_config("simple")
     generate_tfrecords()
+    #generate_tfrecords(prefix="simple")

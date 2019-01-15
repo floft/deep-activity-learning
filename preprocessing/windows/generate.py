@@ -173,21 +173,17 @@ def process_dataset(prefix, folds, name, f, window_size, overlap):
 
         x_train = process_data_x(x[train], window_size, overlap)
         out.create_dataset(str(fold)+"/features_train", data=x_train, compression="gzip")
-        del x_train
 
         y_train = process_data_y(y[train], window_size, overlap)
         out.create_dataset(str(fold)+"/labels_train", data=y_train, compression="gzip")
-        del y_train
 
         test = test_indices[fold]
 
         x_test = process_data_x(x[test], window_size, overlap)
         out.create_dataset(str(fold)+"/features_test", data=x_test, compression="gzip")
-        del x_test
 
         y_test = process_data_y(y[test], window_size, overlap)
         out.create_dataset(str(fold)+"/labels_test", data=y_test, compression="gzip")
-        del y_test
 
 def create_dataset(
         dir_name,

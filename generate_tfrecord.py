@@ -58,8 +58,6 @@ def process_fold(filename, fold, name, num_classes, outputs, seed):
     train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
     write_tfrecord(train_filename, train_data, train_labels)
 
-    del p, train_data, train_labels
-
     #
     # Test data
     #
@@ -74,8 +72,6 @@ def process_fold(filename, fold, name, num_classes, outputs, seed):
 
     test_filename = os.path.join(outputs, name+"_test_"+fold+".tfrecord")
     write_tfrecord(test_filename, test_data, test_labels)
-
-    del p, test_data, test_labels, data
 
 def generate_config(feature_set, inputs="preprocessing/windows",
         outputs="datasets", fold=0):
@@ -105,24 +101,26 @@ def generate_config(feature_set, inputs="preprocessing/windows",
     write_tfrecord_config(os.path.join(outputs, feature_set+".config"),
         num_features, num_classes, time_steps, x_dims)
 
+def get_keys(f):
+    data = load_hdf5(f)
+    return data.keys()
+
 def generate_tfrecords(inputs="preprocessing/windows",
-        outputs="datasets", prefix="*"):
+        outputs="datasets", prefix="*", exclude=[]):
     # Get number of classes
     config = ALConfig()
     num_classes = len(config.labels)
 
     # Get list of all the datasets
     files = pathlib.Path(inputs).glob(prefix+"_*.hdf5")
-    paths = [(x.stem, str(x)) for x in files]
+    paths = [(x.stem, str(x)) for x in files if x.stem not in exclude]
 
     # Get all files and folds
     commands = []
     seed = 0
 
     for name, f in paths:
-        data = load_hdf5(f)
-
-        for fold in data.keys():
+        for fold in get_keys(f):
             commands.append((f, fold, name, num_classes, outputs, seed))
             seed += 2
 
@@ -131,6 +129,7 @@ def generate_tfrecords(inputs="preprocessing/windows",
 
 if __name__ == "__main__":
     generate_config("al")
+    generate_tfrecords(prefix="al")
+
     generate_config("simple")
-    generate_tfrecords()
-    #generate_tfrecords(prefix="simple")
+    generate_tfrecords(prefix="simple")

@@ -596,14 +596,12 @@ def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True):
     """ CNN for image data rather than time-series data """
-    # Build resnet
     with tf.variable_scope("resnet_model"):
-        resnet_output = resnet(x, keep_prob, training)
+        output = resnet(x, keep_prob, training)
 
-    # Other model components passing in output from resnet
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
-            resnet_output, y, domain, grl_lambda, keep_prob, training,
+            output, y, domain, grl_lambda, keep_prob, training,
             num_classes, adaptation, multi_class, class_weights,
             use_feature_extractor=use_feature_extractor)
 
@@ -614,7 +612,35 @@ def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
         if adaptation:
             total_loss += domain_loss
 
-    # We can't generate with this resnet
+    extra_outputs = None
+
+    return task_output, domain_softmax, total_loss, \
+        feature_extractor, summaries, extra_outputs
+
+def attention(x, keep_propb, training):
+    raise NotImplementedError
+
+def build_attention(x, y, domain, grl_lambda, keep_prob, training,
+            num_classes, num_features, adaptation, units,
+            multi_class=False, bidirectional=False, class_weights=1.0,
+            x_dims=None, use_feature_extractor=True):
+    """ Attention is all you need -- for AL features """
+    with tf.variable_scope("attention_model"):
+        output = attention(x, keep_prob, training)
+
+    task_output, domain_softmax, task_loss, domain_loss, \
+        feature_extractor, summaries = build_model(
+            output, y, domain, grl_lambda, keep_prob, training,
+            num_classes, adaptation, multi_class, class_weights,
+            use_feature_extractor=use_feature_extractor)
+
+    # Total loss is the sum
+    with tf.variable_scope("total_loss"):
+        total_loss = task_loss
+
+        if adaptation:
+            total_loss += domain_loss
+
     extra_outputs = None
 
     return task_output, domain_softmax, total_loss, \

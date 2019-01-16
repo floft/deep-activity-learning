@@ -67,7 +67,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
     Also returns sigmoid output for if doing multi-class classification.
     """
     classifier_output = x
-    num_layers = 2
+    num_layers = 1
 
     for i in range(num_layers):
         with tf.variable_scope("layer_"+str(i)):
@@ -75,8 +75,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
             if i == num_layers-1:
                 num_features = num_classes
             else:
-                #num_features = 50
-                num_features = 20
+                num_features = 50
 
             classifier_output = tf.contrib.layers.fully_connected(
                     classifier_output, num_features, activation_fn=None)
@@ -128,13 +127,10 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_layers = 0
 
         if use_feature_extractor:
-            #num_layers = 3
-            num_layers = 1
+            num_layers = 2
 
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):
-                #feature_extractor = tf.contrib.layers.fully_connected(
-                #    feature_extractor, 100, activation_fn=None)
                 feature_extractor = tf.contrib.layers.fully_connected(
                     feature_extractor, 20, activation_fn=None)
                 feature_extractor = tf.nn.dropout(feature_extractor, keep_prob)
@@ -485,16 +481,32 @@ def build_vrnn(x, y, domain, grl_lambda, keep_prob, training,
 
 leaky_relu = lambda net: tf.nn.leaky_relu(net, alpha=0.3)
 
-def cnn(x, keep_prob):
+def cnn(x, keep_prob, training, batch_norm=True):
     """ Simple CNN, taken from tensorflow-experiments/VAE """
-    with framework.arg_scope([layers.conv2d], num_outputs=64, kernel_size=4,
-                    padding='same', activation_fn=leaky_relu):
-        n  = layers.conv2d(x, stride=2)
+    with framework.arg_scope([layers.conv2d], num_outputs=8, kernel_size=[4,1],
+                    padding='same', activation_fn=None):
+        # CNN expects [batch,x1,x2,depth] so we'll make it [batch,time,feature,1]
+        # and have the convolution along the time dimension
+        rank4 = tf.expand_dims(x, -1)
+
+        n  = layers.conv2d(rank4, stride=[2,1])
+        if batch_norm:
+            n = tf.layers.batch_normalization(n, training=training)
+            n = leaky_relu(n)
         n  = tf.nn.dropout(n, keep_prob)
-        n  = layers.conv2d(n, stride=2)
+
+        n  = layers.conv2d(n, stride=[2,1])
+        if batch_norm:
+            n = tf.layers.batch_normalization(n, training=training)
+            n = leaky_relu(n)
         n  = tf.nn.dropout(n, keep_prob)
-        n  = layers.conv2d(n, stride=1)
+
+        n  = layers.conv2d(n, stride=[2,1])
+        if batch_norm:
+            n = tf.layers.batch_normalization(n, training=training)
+            n = leaky_relu(n)
         n  = tf.nn.dropout(n, keep_prob)
+
         n  = layers.flatten(n)
 
     return n
@@ -503,10 +515,11 @@ def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True):
-    """ CNN for image data rather than time-series data """
+    """ CNN but 1-dimensional along the width since not really any relation
+    in proximity/ordering of sensors """
     # Build CNN
     with tf.variable_scope("cnn_model"):
-        cnn_output = cnn(x, keep_prob)
+        cnn_output = cnn(x, keep_prob, training)
 
     # Other model components passing in output from CNN
     task_output, domain_softmax, task_loss, domain_loss, \
@@ -523,6 +536,86 @@ def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
             total_loss += domain_loss
 
     # We can't generate with this CNN
+    extra_outputs = None
+
+    return task_output, domain_softmax, total_loss, \
+        feature_extractor, summaries, extra_outputs
+
+def conv2d(name, inputs, num_outputs, kernel_size, stride, padding,
+        batch_norm=True, training=False,
+        stddev=0.02, activation=tf.nn.relu):
+    with tf.variable_scope(name):
+        conv = tf.contrib.layers.conv2d(inputs, num_outputs, kernel_size, stride, padding,
+                                        activation_fn=None,
+                                        weights_initializer=tf.truncated_normal_initializer(stddev=stddev),
+                                        biases_initializer=tf.constant_initializer(0.0))
+
+        if batch_norm:
+            conv = tf.layers.batch_normalization(conv, training=training)
+
+        if activation is not None:
+            return activation(conv)
+        else:
+            return conv
+
+def residual_block(name, inputs, num_outputs, training=False):
+    with tf.variable_scope(name):
+        r = inputs
+        r = conv2d("c1", r, num_outputs, [3,1], [1,1], "same", training=training)
+        r = conv2d("c2", r, num_outputs, [3,1], [1,1], "same", activation=None, training=training)
+
+        # If the inputs is not the same as the above outputs, then pass through FC
+        # layer to get the same size as above
+        if tf.shape(inputs)[-1] != num_outputs:
+            inputs = tf.contrib.layers.fully_connected(
+                    inputs, num_outputs, activation_fn=None)
+
+        return tf.nn.relu(r + inputs)
+
+def resnet(x, keep_prob, training, batch_norm=True):
+    """ Mostly copied from my CycleGAN implementation """
+    # CNN expects [batch,x1,x2,depth] so we'll make it [batch,time,feature,1]
+    # and have the convolution along the time dimension
+    n = tf.expand_dims(x, -1)
+
+    n = conv2d("c1", n, 8, [7,1], [1,1], "same", batch_norm, training)
+    n = conv2d("c2", n, 16, [3,1], [2,1], "same", batch_norm, training)
+    n = conv2d("c3", n, 32, [3,1], [2,1], "same", batch_norm, training)
+
+    n = residual_block("r1", n, 32, training)
+    n = residual_block("r2", n, 16, training)
+    n = residual_block("r3", n, 8, training)
+
+    # TODO maybe add: n  = tf.nn.dropout(n, keep_prob)
+
+    n  = layers.flatten(n)
+
+    return n
+
+def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
+            num_classes, num_features, adaptation, units,
+            multi_class=False, bidirectional=False, class_weights=1.0,
+            x_dims=None, use_feature_extractor=True):
+    """ CNN for image data rather than time-series data """
+    # Build resnet
+    with tf.variable_scope("resnet_model"):
+        resnet_output = resnet(x, keep_prob, training)
+
+    # Other model components passing in output from resnet
+    task_output, domain_softmax, task_loss, domain_loss, \
+        feature_extractor, summaries = build_model(
+            resnet_output, y, domain, grl_lambda, keep_prob, training,
+            num_classes, adaptation, multi_class, class_weights,
+            use_feature_extractor=use_feature_extractor)
+
+    # Total loss is the sum
+    with tf.variable_scope("total_loss"):
+        total_loss = task_loss
+
+        if adaptation:
+            total_loss += domain_loss
+
+    # We can't generate with this resnet
     extra_outputs = None
 
     return task_output, domain_softmax, total_loss, \

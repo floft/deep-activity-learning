@@ -21,7 +21,8 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 from plot import plot_embedding, plot_random_time_series, plot_real_time_series
-from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat
+from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat, \
+    build_resnet
 from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
     domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
     calc_class_weights
@@ -520,11 +521,16 @@ def train(
         save_steps=model_save_steps, saver=saver)
     writer = tf.summary.FileWriter(log_dir)
 
+    # Allow running two at once
+    # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
+    config = tf.ConfigProto()
+    config.gpu_options.per_process_gpu_memory_fraction = 0.2
+
     # Start training
     with tf.train.SingularMonitoredSession(checkpoint_dir=model_dir, hooks=[
                 input_hook_a, input_hook_b,
                 saver_hook
-            ]) as sess:
+            ], config=config) as sess:
 
         for i in range(sess.run(global_step),num_steps+1):
             if i == 0:
@@ -763,13 +769,21 @@ if __name__ == '__main__':
     parser.add_argument('--no-vrnn-da', dest='vrnn_da', action='store_false',
         help="Do not use VRNN-DA model (default)")
     parser.add_argument('--cnn', dest='cnn', action='store_true',
-        help="Use CNN model (for MNIST or SVHN)")
+        help="Use CNN model")
     parser.add_argument('--no-cnn', dest='cnn', action='store_false',
         help="Do not use CNN model (default)")
     parser.add_argument('--cnn-da', dest='cnn_da', action='store_true',
-        help="Use CNN-DA model (for MNIST or SVHN)")
+        help="Use CNN-DA model")
     parser.add_argument('--no-cnn-da', dest='cnn_da', action='store_false',
         help="Do not use CNN-DA model (default)")
+    parser.add_argument('--resnet', dest='resnet', action='store_true',
+        help="Use resnet model")
+    parser.add_argument('--no-resnet', dest='resnet', action='store_false',
+        help="Do not use resnet model (default)")
+    parser.add_argument('--resnet-da', dest='resnet_da', action='store_true',
+        help="Use resnet-DA model")
+    parser.add_argument('--no-resnet-da', dest='resnet_da', action='store_false',
+        help="Do not use resnet-DA model (default)")
     parser.add_argument('--tcn', dest='tcn', action='store_true',
         help="Use TCN model")
     parser.add_argument('--no-tcn', dest='tcn', action='store_false',
@@ -804,14 +818,14 @@ if __name__ == '__main__':
         help="Multiplier for extra discriminator training learning rate (default 1.0)")
     parser.add_argument('--dropout', default=0.8, type=float,
         help="Keep probability for dropout (default 0.8)")
-    parser.add_argument('--model-steps', default=1000, type=int,
-        help="Save the model every so many steps (default 1000)")
-    parser.add_argument('--log-steps', default=100, type=int,
-        help="Log training losses and accuracy every so many steps (default 100)")
-    parser.add_argument('--log-steps-val', default=2000, type=int,
-        help="Log validation accuracy and AUC every so many steps (default 1000)")
-    parser.add_argument('--log-steps-extra', default=2000, type=int,
-        help="Log weights, plots, etc. every so many steps (default 1000)")
+    parser.add_argument('--model-steps', default=4000, type=int,
+        help="Save the model every so many steps (default 4000)")
+    parser.add_argument('--log-steps', default=500, type=int,
+        help="Log training losses and accuracy every so many steps (default 500)")
+    parser.add_argument('--log-steps-val', default=4000, type=int,
+        help="Log validation accuracy and AUC every so many steps (default 4000)")
+    parser.add_argument('--log-steps-extra', default=50000, type=int,
+        help="Log weights, plots, etc. every so many steps (default 50000)")
     parser.add_argument('--max-examples', default=5000, type=int,
         help="Max number of examples to evaluate for validation (default 5000)")
     parser.add_argument('--max-plot-examples', default=100, type=int,
@@ -842,6 +856,7 @@ if __name__ == '__main__':
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
         lstm_da=False, vrnn_da=False, cnn_da=False, tcn_da=False, flat_da=False,
+        resnet=False, resnet_da=False,
         balance=True, sample=False, bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
@@ -867,7 +882,7 @@ if __name__ == '__main__':
     # Train with desired method
     assert args.lstm + args.vrnn + args.lstm_da + args.vrnn_da \
         + args.cnn + args.cnn_da + args.tcn + args.tcn_da \
-        + args.flat + args.flat_da == 1, \
+        + args.flat + args.flat_da + args.resnet + args.resnet_da == 1, \
         "Must specify exactly one method to run"
 
     prefix = args.target+"-"
@@ -896,6 +911,14 @@ if __name__ == '__main__':
         prefix += "cnn-da"
         adaptation = True
         model_func = build_cnn
+    elif args.resnet:
+        prefix += "resnet"
+        adaptation = False
+        model_func = build_resnet
+    elif args.resnet_da:
+        prefix += "resnet-da"
+        adaptation = True
+        model_func = build_resnet
     elif args.tcn:
         prefix += "tcn"
         adaptation = False

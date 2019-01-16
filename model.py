@@ -79,7 +79,6 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
 
             classifier_output = tf.contrib.layers.fully_connected(
                     classifier_output, num_features, activation_fn=None)
-            classifier_output = tf.nn.dropout(classifier_output, keep_prob)
 
             if batch_norm:
                 classifier_output = tf.layers.batch_normalization(
@@ -88,6 +87,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
             # Last activation is softmax, which we will apply afterwards
             if i != num_layers-1:
                 classifier_output = tf.nn.relu(classifier_output)
+                classifier_output = tf.nn.dropout(classifier_output, keep_prob)
 
     sigmoid_output = tf.nn.sigmoid(classifier_output)
     softmax_output = tf.nn.softmax(classifier_output)
@@ -617,8 +617,101 @@ def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
     return task_output, domain_softmax, total_loss, \
         feature_extractor, summaries, extra_outputs
 
-def attention(x, keep_propb, training):
-    raise NotImplementedError
+def feature_attention_block(name, x, num_features, keep_prob, training, units,
+        batch_norm=True, all_features=True):
+    """
+    Attention to pick which features to pay attention to -- inspired by how
+    decision trees pick features to use in the classification.
+
+    This is in contrast to the original use of attention to pick which words
+    in a sentence to pay attention to for machine translation, where each word
+    would have the same features, but attention was over the words not features.
+    """
+    # TODO maybe add dropout #e = tf.nn.dropout(e, keep_prob)
+
+    with tf.variable_scope(name):
+        batch_size = tf.shape(x)[0]
+
+        # Compute energies -- input is one-hot-encoded position concatenated with
+        # the entire feature vector, e.g. a_1 = <(1,0,0,...,0),(all feature values)>
+        #
+        # TODO won't work since we do this in batches...
+        #positions = tf.one_hot(range(num_features), num_features) # ends up being identity matrix
+        #positions = tf.tile(tf.expand_dims(positions, axis=0), (batch_size, 1, 1)) # make length of batch
+        #features = tf.tile(tf.expand_dims(a, axis=1), (1,num_features,1))
+        #energy_input = tf.concat([positions, features], axis=2)
+        # Thus, instead...
+        #
+        # We do this one for each feature since we need to share FC weights and
+        # if we have more than [batch,feature] dimensions for FC, it'll flatten it,
+        # i.e. it won't share the weights between features.
+        e = []
+
+        for i in range(num_features):
+            # Whether to encode all features and the position of the current
+            # feature or only the position and this single feature
+            if all_features:
+                # one-hot encode i, e.g. (1,0,0,0,0,....) if i=0
+                #position = tf.one_hot(i, num_features)
+                # duplicate along batch dimension
+                position = tf.tile(tf.expand_dims(position, axis=0), (batch_size, 1))
+                # concatenate so, e.g. a_1 = <1,0,0,0,...,x_0,x_1,...>
+                features = x
+                e_i = tf.concat([position, features], axis=1)
+            else:
+                # encode the position as a number between 0 and 1
+                position = tf.constant([i/num_features], dtype=tf.float32)
+                # duplicate along batch dimension
+                position = tf.tile(tf.expand_dims(position, axis=0), (batch_size, 1))
+                # grab all the i'th features from the batch
+                feature = tf.slice(x, [0,i], [batch_size, 1])
+                # concatenate so, e.g. a_1 = <i/num_features, feature_i> for each in batch
+                e_i = tf.concat([position, feature], axis=1)
+
+            # Reuse same FC weights for each i
+            with tf.variable_scope("compute_energy", reuse=tf.AUTO_REUSE):
+                e_i = tf.contrib.layers.fully_connected(e_i, units, activation_fn=tf.nn.tanh)
+                if batch_norm:
+                    e_i = tf.layers.batch_normalization(e_i, training=training)
+                e_i = tf.nn.dropout(e_i, keep_prob)
+
+                # e_i = tf.contrib.layers.fully_connected(e_i, units, activation_fn=tf.nn.tanh)
+                # if batch_norm:
+                #     e_i = tf.layers.batch_normalization(e_i, training=training)
+                # e_i = tf.nn.dropout(e_i, keep_prob)
+
+                e_i = tf.contrib.layers.fully_connected(e_i, 1, activation_fn=tf.nn.relu)
+
+            e.append(e_i)
+
+        # e.g. [batch 0 [e_1, e_2, e_3], batch 1 [e_1, e_2, e_3]] if 3 features
+        e = tf.concat(e, axis=1)
+
+        # alphas sum to one, so compute softmax
+        alphas = tf.nn.softmax(e)
+
+        # compute the new features weighted by the alphas
+        c = tf.multiply(x, alphas)
+
+    return c
+
+def attention(x, keep_prob, training, num_features, batch_norm=True):
+    n = x
+
+    if batch_norm:
+        n = tf.layers.batch_normalization(n, training=training)
+
+    n = feature_attention_block("a1", n, num_features, keep_prob, training, units=10)
+
+    if batch_norm:
+        n = tf.layers.batch_normalization(n, training=training)
+
+    #n = feature_attention_block("a2", n, num_features, keep_prob, training, units=10)
+
+    #if batch_norm:
+    #    n = tf.layers.batch_normalization(n, training=training)
+
+    return n
 
 def build_attention(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
@@ -626,7 +719,17 @@ def build_attention(x, y, domain, grl_lambda, keep_prob, training,
             x_dims=None, use_feature_extractor=True):
     """ Attention is all you need -- for AL features """
     with tf.variable_scope("attention_model"):
-        output = attention(x, keep_prob, training)
+        # Flatten data first -- reshape from [batch, time steps, features]
+        # to be [batch, time steps * features], i.e. [batch_size, -1] except Dense
+        # doesn't work with size None
+        #
+        # Note: for AL features, we have [batch, 1, features] anyway, so this
+        # essentially just makes it [batch, features] like we want since AL
+        # already computed the time-series features
+        flat = tf.reshape(x, [tf.shape(x)[0], np.prod(x_dims)])
+        flat_num_features = np.prod(x_dims)
+
+        output = attention(flat, keep_prob, training, flat_num_features)
 
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(

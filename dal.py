@@ -844,7 +844,8 @@ if __name__ == '__main__':
         class_weights = 1.0
 
     # Train with desired method
-    assert args.lstm + args.vrnn + args.cnn + args.tcn + args.flat + args.resnet == 1, \
+    assert args.lstm + args.vrnn + args.cnn + args.tcn + args.flat + args.resnet \
+        + args.attention == 1, \
         "Must specify exactly one method to run"
 
     prefix = args.target+"-"

@@ -12,6 +12,9 @@ cd ../al-features
 cd ../simple-features
 ./export_data.sh ../translated/*/*.txt
 
+cd ../simple2-features
+./export_data.sh ../translated/*/*.txt
+
 cd ../windows
 python3 generate.py
 

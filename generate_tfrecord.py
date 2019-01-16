@@ -133,3 +133,6 @@ if __name__ == "__main__":
 
     generate_config("simple")
     generate_tfrecords(prefix="simple")
+
+    generate_config("simple2")
+    generate_tfrecords(prefix="simple2")

@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 from plot import plot_embedding, plot_random_time_series, plot_real_time_series
 from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat, \
-    build_resnet
+    build_resnet, build_attention
 from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
     domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
     calc_class_weights
@@ -752,54 +752,22 @@ if __name__ == '__main__':
         help="Directory for saving model files")
     parser.add_argument('--logdir', default="logs", type=str,
         help="Directory for saving log files")
+    parser.add_argument('--da', dest='adaptation', action='store_true',
+        help="Perform domain adaptation on the model")
     parser.add_argument('--lstm', dest='lstm', action='store_true',
         help="Use LSTM model")
-    parser.add_argument('--no-lstm', dest='lstm', action='store_false',
-        help="Do not LSTM model (default)")
     parser.add_argument('--vrnn', dest='vrnn', action='store_true',
         help="Use VRNN model")
-    parser.add_argument('--no-vrnn', dest='vrnn', action='store_false',
-        help="Do not use VRNN model (default)")
-    parser.add_argument('--lstm-da', dest='lstm_da', action='store_true',
-        help="Use LSTM-DA model")
-    parser.add_argument('--no-lstm-da', dest='lstm_da', action='store_false',
-        help="Do not use LSTM-DA model (default)")
-    parser.add_argument('--vrnn-da', dest='vrnn_da', action='store_true',
-        help="Use VRNN-DA model")
-    parser.add_argument('--no-vrnn-da', dest='vrnn_da', action='store_false',
-        help="Do not use VRNN-DA model (default)")
     parser.add_argument('--cnn', dest='cnn', action='store_true',
         help="Use CNN model")
-    parser.add_argument('--no-cnn', dest='cnn', action='store_false',
-        help="Do not use CNN model (default)")
-    parser.add_argument('--cnn-da', dest='cnn_da', action='store_true',
-        help="Use CNN-DA model")
-    parser.add_argument('--no-cnn-da', dest='cnn_da', action='store_false',
-        help="Do not use CNN-DA model (default)")
     parser.add_argument('--resnet', dest='resnet', action='store_true',
         help="Use resnet model")
-    parser.add_argument('--no-resnet', dest='resnet', action='store_false',
-        help="Do not use resnet model (default)")
-    parser.add_argument('--resnet-da', dest='resnet_da', action='store_true',
-        help="Use resnet-DA model")
-    parser.add_argument('--no-resnet-da', dest='resnet_da', action='store_false',
-        help="Do not use resnet-DA model (default)")
+    parser.add_argument('--attention', dest='attention', action='store_true',
+        help="Use attention model")
     parser.add_argument('--tcn', dest='tcn', action='store_true',
         help="Use TCN model")
-    parser.add_argument('--no-tcn', dest='tcn', action='store_false',
-        help="Do not use TCN model (default)")
-    parser.add_argument('--tcn-da', dest='tcn_da', action='store_true',
-        help="Use TCN-DA model")
-    parser.add_argument('--no-tcn-da', dest='tcn_da', action='store_false',
-        help="Do not use TCN-DA model (default)")
     parser.add_argument('--flat', dest='flat', action='store_true',
         help="Use flat model, i.e. only flatten input fed to feature extractor")
-    parser.add_argument('--no-flat', dest='flat', action='store_false',
-        help="Do not use flat model (default)")
-    parser.add_argument('--flat-da', dest='flat_da', action='store_true',
-        help="Use flat-DA model")
-    parser.add_argument('--no-flat-da', dest='flat_da', action='store_false',
-        help="Do not use flat-DA model (default)")
     parser.add_argument('--fold', default=0, type=int,
         help="What fold to use from the dataset files (default fold 0)")
     parser.add_argument('--target', default="hh101", type=str,
@@ -836,14 +804,10 @@ if __name__ == '__main__':
         help="Do not weight loss function with high class imbalances")
     parser.add_argument('--sample', dest='sample', action='store_true',
         help="Only use a small amount of data for training/testing")
-    parser.add_argument('--no-sample', dest='sample', action='store_false',
-        help="Use the full amount of training/testing data (default)")
     parser.add_argument('--balance-pow', default=1.0, type=float,
         help="For increased balancing, raise weights to a specified power (default 1.0)")
     parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
         help="Use a bidirectional RNN (when selected method includes an RNN)")
-    parser.add_argument('--no-bidirectional', dest='bidirectional', action='store_false',
-        help="Do not use a bidirectional RNN (default)")
     parser.add_argument('--feature-extractor', dest='feature_extractor', action='store_true',
         help="Use a feature extractor before task classifier/domain predictor (default)")
     parser.add_argument('--no-feature-extractor', dest='feature_extractor', action='store_false',
@@ -855,9 +819,9 @@ if __name__ == '__main__':
             +"(Don't pass both this and --debug at the same time.)")
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
-        lstm_da=False, vrnn_da=False, cnn_da=False, tcn_da=False, flat_da=False,
-        resnet=False, resnet_da=False,
-        balance=True, sample=False, bidirectional=False, feature_extractor=True, debug=False)
+        resnet=False, attention=False,
+        adaptation=False, balance=True, sample=False,
+        bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
     # Load datasets
@@ -880,61 +844,35 @@ if __name__ == '__main__':
         class_weights = 1.0
 
     # Train with desired method
-    assert args.lstm + args.vrnn + args.lstm_da + args.vrnn_da \
-        + args.cnn + args.cnn_da + args.tcn + args.tcn_da \
-        + args.flat + args.flat_da + args.resnet + args.resnet_da == 1, \
+    assert args.lstm + args.vrnn + args.cnn + args.tcn + args.flat + args.resnet == 1, \
         "Must specify exactly one method to run"
 
     prefix = args.target+"-"
 
     if args.lstm:
         prefix += "lstm"
-        adaptation = False
         model_func = build_lstm
     elif args.vrnn:
         prefix += "vrnn"
-        adaptation = False
-        model_func = build_vrnn
-    elif args.lstm_da:
-        prefix += "lstm-da"
-        adaptation = True
-        model_func = build_lstm
-    elif args.vrnn_da:
-        prefix += "vrnn-da"
-        adaptation = True
         model_func = build_vrnn
     elif args.cnn:
         prefix += "cnn"
-        adaptation = False
-        model_func = build_cnn
-    elif args.cnn_da:
-        prefix += "cnn-da"
-        adaptation = True
         model_func = build_cnn
     elif args.resnet:
         prefix += "resnet"
-        adaptation = False
         model_func = build_resnet
-    elif args.resnet_da:
-        prefix += "resnet-da"
-        adaptation = True
-        model_func = build_resnet
+    elif args.attention:
+        prefix += "attention"
+        model_func = build_attention
     elif args.tcn:
         prefix += "tcn"
-        adaptation = False
-        model_func = build_tcn
-    elif args.tcn_da:
-        prefix += "tcn-da"
-        adaptation = True
         model_func = build_tcn
     elif args.flat:
         prefix += "flat"
-        adaptation = False
         model_func = build_flat
-    elif args.flat_da:
-        prefix += "flat-da"
-        adaptation = True
-        model_func = build_flat
+
+    if args.adaptation:
+        prefix += "-da"
 
     # Use the number specified on the command line (higher precidence than --debug)
     if args.debug_num >= 0:
@@ -967,7 +905,7 @@ if __name__ == '__main__':
             model_func=model_func,
             model_dir=model_dir,
             log_dir=log_dir,
-            adaptation=adaptation,
+            adaptation=args.adaptation,
             num_steps=args.steps,
             learning_rate=args.lr,
             lr_multiplier=args.lr_mult,

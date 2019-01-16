@@ -820,6 +820,10 @@ if __name__ == '__main__':
         help="On high class imbalances weight the loss function (default)")
     parser.add_argument('--no-balance', dest='balance', action='store_false',
         help="Do not weight loss function with high class imbalances")
+    parser.add_argument('--sample', dest='sample', action='store_true',
+        help="Only use a small amount of data for training/testing")
+    parser.add_argument('--no-sample', dest='sample', action='store_false',
+        help="Use the full amount of training/testing data (default)")
     parser.add_argument('--balance-pow', default=1.0, type=float,
         help="For increased balancing, raise weights to a specified power (default 1.0)")
     parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
@@ -838,7 +842,7 @@ if __name__ == '__main__':
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
         lstm_da=False, vrnn_da=False, cnn_da=False, tcn_da=False, flat_da=False,
-        balance=True, bidirectional=False, feature_extractor=True, debug=False)
+        balance=True, sample=False, bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
     # Load datasets
@@ -850,7 +854,7 @@ if __name__ == '__main__':
 
     tfrecords_train_a, tfrecords_train_b, \
     tfrecords_test_a, tfrecords_test_b = \
-        get_tfrecord_datasets(args.features, args.target, args.fold)
+        get_tfrecord_datasets(args.features, args.target, args.fold, args.sample)
 
     # Calculate class imbalance using labeled training data (i.e. from domain A)
     if args.balance:

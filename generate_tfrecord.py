@@ -39,7 +39,7 @@ def write_tfrecord_config(filename, num_features, num_classes, time_steps, x_dim
         f.write("time_steps "+str(time_steps)+"\n")
         f.write("x_dims "+" ".join([str(x) for x in x_dims])+"\n")
 
-def process_fold(filename, fold, name, num_classes, outputs, seed):
+def process_fold(filename, fold, name, num_classes, outputs, seed, sample=False):
     data = load_hdf5(filename)
     index_one = False # Labels start from 0
 
@@ -55,6 +55,10 @@ def process_fold(filename, fold, name, num_classes, outputs, seed):
     train_data = train_data[p]
     train_labels = train_labels[p]
 
+    if sample:
+        train_data = train_data[:2000]
+        train_labels = train_labels[:2000]
+
     train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
     write_tfrecord(train_filename, train_data, train_labels)
 
@@ -63,6 +67,10 @@ def process_fold(filename, fold, name, num_classes, outputs, seed):
     #
     test_data = np.array(data[fold]["features_test"])
     test_labels = np.array(data[fold]["labels_test"])
+
+    if sample:
+        test_data = test_data[:1000]
+        test_labels = test_labels[:1000]
 
     test_data, test_labels = one_hot(test_data, test_labels, num_classes, index_one)
 
@@ -103,7 +111,7 @@ def generate_config(feature_set, inputs="preprocessing/windows",
 
 def get_keys(f):
     data = load_hdf5(f)
-    return data.keys()
+    return list(data.keys())
 
 def generate_tfrecords(inputs="preprocessing/windows",
         outputs="datasets", prefix="*", exclude=[]):
@@ -127,7 +135,21 @@ def generate_tfrecords(inputs="preprocessing/windows",
     # Process them all
     run_job_pool(process_fold, commands)
 
+def generate_tfrecords_sample(files, inputs="preprocessing/windows",
+        outputs="datasets"):
+    # Get number of classes
+    config = ALConfig()
+    num_classes = len(config.labels)
+
+    for f in files:
+        filename = os.path.join(inputs, f+".hdf5")
+        fold = get_keys(filename)[-1]
+
+        # Only write a sample, not the whole file
+        process_fold(filename, fold, "sample_"+f, num_classes, outputs, 0, sample=True)
+
 if __name__ == "__main__":
+    # Alternative feature sets
     generate_config("al")
     generate_tfrecords(prefix="al")
 
@@ -136,3 +158,6 @@ if __name__ == "__main__":
 
     generate_config("simple2")
     generate_tfrecords(prefix="simple2")
+
+    # 100-sample test
+    generate_tfrecords_sample(["al_hh101", "al_hh102"])

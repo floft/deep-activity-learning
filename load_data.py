@@ -274,8 +274,11 @@ def load_data_home_da(fold, target, feature_set, dir_name="preprocessing/windows
         train_data_b, train_labels_b, \
         test_data_b, test_labels_b
 
-def get_tfrecord_traintest_datasets(feature_set, target, fold, dataset, dir_name="datasets"):
+def get_tfrecord_traintest_datasets(feature_set, target, fold, dataset, sample, dir_name="datasets"):
     """ Get all the train sets or test sets (dataset="train" or dataset="test") """
+    if sample:
+        feature_set = "sample_"+feature_set
+
     files = pathlib.Path(dir_name).glob(feature_set+"_*_"+dataset+"_"+str(fold)+".tfrecord")
     paths = [(x.stem, str(x)) for x in files]
     target_file = None
@@ -297,12 +300,12 @@ def get_tfrecord_traintest_datasets(feature_set, target, fold, dataset, dir_name
 
     return tfrecords_a, tfrecords_b
 
-def get_tfrecord_datasets(feature_set, target, fold, dir_name="datasets"):
+def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="datasets"):
     """ Get all the train/test A/B .tfrecord files """
     tfrecords_train_a, tfrecords_train_b = \
-        get_tfrecord_traintest_datasets(feature_set, target, fold, "train", dir_name)
+        get_tfrecord_traintest_datasets(feature_set, target, fold, "train", sample, dir_name)
     tfrecords_test_a, tfrecords_test_b = \
-        get_tfrecord_traintest_datasets(feature_set, target, fold, "test", dir_name)
+        get_tfrecord_traintest_datasets(feature_set, target, fold, "test", sample, dir_name)
 
     return tfrecords_train_a, tfrecords_train_b, \
         tfrecords_test_a, tfrecords_test_b

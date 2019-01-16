@@ -578,13 +578,12 @@ def resnet(x, keep_prob, training, batch_norm=True):
     # and have the convolution along the time dimension
     n = tf.expand_dims(x, -1)
 
-    n = conv2d("c1", n, 8, [7,1], [1,1], "same", batch_norm, training)
-    n = conv2d("c2", n, 16, [3,1], [2,1], "same", batch_norm, training)
-    n = conv2d("c3", n, 32, [3,1], [2,1], "same", batch_norm, training)
+    n = conv2d("c1", n, 8, [3,1], [1,1], "same", batch_norm, training)
+    #n = conv2d("c2", n, 8, [3,1], [2,1], "same", batch_norm, training)
+    #n = conv2d("c3", n, 8, [3,1], [2,1], "same", batch_norm, training)
 
-    n = residual_block("r1", n, 32, training)
-    n = residual_block("r2", n, 16, training)
-    n = residual_block("r3", n, 8, training)
+    n = residual_block("r1", n, 8, training)
+    #n = residual_block("r2", n, 8, training)
 
     # TODO maybe add: n  = tf.nn.dropout(n, keep_prob)
 

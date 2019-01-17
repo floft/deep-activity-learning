@@ -25,7 +25,8 @@ class IteratorInitializerHook(tf.train.SessionRunHook):
         self.iter_init_func(sess)
 
 def _get_input_fn(features, labels, batch_size,
-        evaluation=False, buffer_size=10000, eval_shuffle_seed=0):
+        evaluation=False, buffer_size=10000, eval_shuffle_seed=0,
+        prefetch_buffer_size=1):
     """ Load data from numpy arrays (requires more memory but less disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -36,9 +37,15 @@ def _get_input_fn(features, labels, batch_size,
         dataset = tf.data.Dataset.from_tensor_slices((features_placeholder, labels_placeholder))
 
         if evaluation:
-            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
+            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed)
         else:
-            dataset = dataset.shuffle(buffer_size).repeat().batch(batch_size)
+            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
+
+        dataset = dataset.batch(batch_size)
+
+        # Prefetch for speed up
+        # See: https://www.tensorflow.org/guide/performance/datasets
+        dataset = dataset.prefetch(prefetch_buffer_size)
 
         iterator = dataset.make_initializable_iterator()
         next_data_batch, next_label_batch = iterator.get_next()
@@ -51,7 +58,8 @@ def _get_input_fn(features, labels, batch_size,
     return input_fn, iter_init_hook
 
 def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
-        evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0):
+        evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
+        prefetch_buffer_size=1):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -64,19 +72,27 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
 
     def _parse_function(example_proto):
         # Parse the input tf.Example proto using the dictionary above.
-        parsed = tf.parse_single_example(example_proto, feature_description)
+        # parse_single_example is without a batch, parse_example is with batches
+        parsed = tf.parse_example(example_proto, feature_description)
         return parsed["x"], parsed["y"]
 
     def input_fn():
         dataset = tf.data.TFRecordDataset(filenames, compression_type='GZIP')
-        dataset = dataset.map(_parse_function)
 
         if count: # only count, so no need to shuffle
-            dataset = dataset.batch(batch_size)
+            pass
         elif evaluation: # don't repeat since we want to evaluate entire set
-            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed).batch(batch_size)
+            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed)
         else: # repeat, shuffle, and batch
-            dataset = dataset.shuffle(buffer_size).repeat().batch(batch_size)
+            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
+
+        # Apply map after batching to reduce overhead of really quick parse function
+        dataset = dataset.batch(batch_size)
+        dataset = dataset.map(_parse_function)
+
+        # Prefetch for speed up
+        # See: https://www.tensorflow.org/guide/performance/datasets
+        dataset = dataset.prefetch(prefetch_buffer_size)
 
         iterator = dataset.make_initializable_iterator()
         next_data_batch, next_label_batch = iterator.get_next()

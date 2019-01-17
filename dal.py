@@ -779,16 +779,16 @@ if __name__ == '__main__':
         help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
     parser.add_argument('--steps', default=100000, type=int,
         help="Number of training steps to run (default 100000)")
-    parser.add_argument('--batch', default=256, type=int,
-        help="Batch size to use (default 256, decrease if you run out of memory)")
-    parser.add_argument('--lr', default=0.0003, type=float,
+    parser.add_argument('--batch', default=1024, type=int,
+        help="Batch size to use (default 1025, decrease if you run out of memory)")
+    parser.add_argument('--lr', default=0.0001, type=float,
         help="Learning rate for training (default 0.0003)")
     parser.add_argument('--lr-mult', default=1.0, type=float,
         help="Multiplier for extra discriminator training learning rate (default 1.0)")
     parser.add_argument('--dropout', default=0.8, type=float,
         help="Keep probability for dropout (default 0.8)")
-    parser.add_argument('--gpu-mem', default=0.8, type=float,
-        help="Percentage of GPU memory to let TensorFlow use (default 0.8)")
+    parser.add_argument('--gpu-mem', default=0.1, type=float,
+        help="Percentage of GPU memory to let TensorFlow use (default 0.1, max ~0.8)")
     parser.add_argument('--model-steps', default=4000, type=int,
         help="Save the model every so many steps (default 4000)")
     parser.add_argument('--log-steps', default=500, type=int,

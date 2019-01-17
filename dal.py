@@ -387,6 +387,7 @@ def train(
         class_weights=1.0,
         plot_gradients=False,
         min_domain_accuracy=0.60,
+        gpu_memory=0.8,
         max_examples=5000,
         max_plot_examples=100):
 
@@ -524,7 +525,7 @@ def train(
     # Allow running two at once
     # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
     config = tf.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = 0.2
+    config.gpu_options.per_process_gpu_memory_fraction = gpu_memory
 
     # Start training
     with tf.train.SingularMonitoredSession(checkpoint_dir=model_dir, hooks=[
@@ -786,6 +787,8 @@ if __name__ == '__main__':
         help="Multiplier for extra discriminator training learning rate (default 1.0)")
     parser.add_argument('--dropout', default=0.8, type=float,
         help="Keep probability for dropout (default 0.8)")
+    parser.add_argument('--gpu-mem', default=0.8, type=float,
+        help="Percentage of GPU memory to let TensorFlow use (default 0.8)")
     parser.add_argument('--model-steps', default=4000, type=int,
         help="Save the model every so many steps (default 4000)")
     parser.add_argument('--log-steps', default=500, type=int,
@@ -921,5 +924,6 @@ if __name__ == '__main__':
             multi_class=False,
             bidirectional=args.bidirectional,
             class_weights=class_weights,
+            gpu_memory=args.gpu_mem,
             max_examples=args.max_examples,
             max_plot_examples=args.max_plot_examples)

@@ -490,25 +490,24 @@ leaky_relu = lambda net: tf.nn.leaky_relu(net, alpha=0.3)
 
 def cnn(x, keep_prob, training, batch_norm=True):
     """ Simple CNN, taken from tensorflow-experiments/VAE """
-    with framework.arg_scope([layers.conv2d], num_outputs=8, kernel_size=[4,1],
-                    padding='same', activation_fn=None):
+    with framework.arg_scope([layers.conv2d], padding='same', activation_fn=None):
         # CNN expects [batch,x1,x2,depth] so we'll make it [batch,time,feature,1]
         # and have the convolution along the time dimension
         rank4 = tf.expand_dims(x, -1)
 
-        n  = layers.conv2d(rank4, stride=[2,1])
+        n  = layers.conv2d(rank4, num_outputs=16, stride=[1,1], kernel_size=[7,1])
         if batch_norm:
             n = tf.layers.batch_normalization(n, training=training)
             n = leaky_relu(n)
         n  = tf.nn.dropout(n, keep_prob)
 
-        n  = layers.conv2d(n, stride=[2,1])
+        n  = layers.conv2d(n, num_outputs=32, stride=[2,1], kernel_size=[3,1])
         if batch_norm:
             n = tf.layers.batch_normalization(n, training=training)
             n = leaky_relu(n)
         n  = tf.nn.dropout(n, keep_prob)
 
-        n  = layers.conv2d(n, stride=[2,1])
+        n  = layers.conv2d(n, num_outputs=64, stride=[2,1], kernel_size=[3,1])
         if batch_norm:
             n = tf.layers.batch_normalization(n, training=training)
             n = leaky_relu(n)
@@ -553,7 +552,7 @@ def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
         feature_extractor, summaries, extra_outputs
 
 def conv2d(name, inputs, num_outputs, kernel_size, stride, padding,
-        batch_norm=True, training=False,
+        batch_norm=True, training=False, keep_prob=1.0,
         stddev=0.02, activation=tf.nn.relu):
     with tf.variable_scope(name):
         conv = tf.contrib.layers.conv2d(inputs, num_outputs, kernel_size, stride, padding,
@@ -565,15 +564,19 @@ def conv2d(name, inputs, num_outputs, kernel_size, stride, padding,
             conv = tf.layers.batch_normalization(conv, training=training)
 
         if activation is not None:
-            return activation(conv)
-        else:
+            conv = activation(conv)
+
+        conv = tf.nn.dropout(conv, keep_prob)
+
             return conv
 
-def residual_block(name, inputs, num_outputs, training=False):
+def residual_block(name, inputs, num_outputs, training=False, keep_prob=1.0):
     with tf.variable_scope(name):
         r = inputs
-        r = conv2d("c1", r, num_outputs, [3,1], [1,1], "same", training=training)
-        r = conv2d("c2", r, num_outputs, [3,1], [1,1], "same", activation=None, training=training)
+        r = conv2d("c1", r, num_outputs, [3,1], [1,1], "same",
+            training=training, keep_prob=keep_prob)
+        r = conv2d("c2", r, num_outputs, [3,1], [1,1], "same", activation=None,
+            training=training, keep_prob=keep_prob)
 
         # If the inputs is not the same as the above outputs, then pass through FC
         # layer to get the same size as above
@@ -589,14 +592,11 @@ def resnet(x, keep_prob, training, batch_norm=True):
     # and have the convolution along the time dimension
     n = tf.expand_dims(x, -1)
 
-    n = conv2d("c1", n, 8, [3,1], [1,1], "same", batch_norm, training)
-    n = conv2d("c2", n, 8, [3,1], [2,1], "same", batch_norm, training)
-    #n = conv2d("c3", n, 8, [3,1], [2,1], "same", batch_norm, training)
+    n = conv2d("c1", n, 16, [7,1], [1,1], "same", batch_norm, training, keep_prob)
+    n = conv2d("c2", n, 32, [3,1], [2,1], "same", batch_norm, training, keep_prob)
+    n = conv2d("c3", n, 64, [3,1], [2,1], "same", batch_norm, training, keep_prob)
 
-    n = residual_block("r1", n, 8, training)
-    n = residual_block("r2", n, 8, training)
-
-    # TODO maybe add: n  = tf.nn.dropout(n, keep_prob)
+    n = residual_block("r1", n, 32, training, keep_prob)
 
     n  = layers.flatten(n)
 

@@ -132,14 +132,14 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):
                 feature_extractor = tf.contrib.layers.fully_connected(
-                    feature_extractor, 20, activation_fn=None)
-                feature_extractor = tf.nn.dropout(feature_extractor, keep_prob)
+                    feature_extractor, 50, activation_fn=None)
 
                 if batch_norm:
                     feature_extractor = tf.layers.batch_normalization(
                         feature_extractor, training=training)
 
                 feature_extractor = tf.nn.relu(feature_extractor)
+                feature_extractor = tf.nn.dropout(feature_extractor, keep_prob)
 
     # Pass last output to fully connected then softmax to get class prediction
     with tf.variable_scope("task_classifier"):
@@ -278,13 +278,17 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
 def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True):
+            x_dims=None, use_feature_extractor=True, batch_norm=True):
     """ TCN as an alternative to using RNNs """
     # Build TCN
     with tf.variable_scope("tcn_model"):
+        n = x
+        if batch_norm:
+            n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
+
         dropout = 1-keep_prob
         tcn = TemporalConvNet([units, units, units, units], 2, dropout)
-        tcn_output = tcn(x, training=training)[:, -1]
+        tcn_output = tcn(n, training=training)[:, -1]
 
     # Other model components passing in output from TCN
     task_output, domain_softmax, task_loss, domain_loss, \
@@ -517,12 +521,16 @@ def cnn(x, keep_prob, training, batch_norm=True):
 def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True):
+            x_dims=None, use_feature_extractor=True, batch_norm=True):
     """ CNN but 1-dimensional along the width since not really any relation
     in proximity/ordering of sensors """
     # Build CNN
     with tf.variable_scope("cnn_model"):
-        cnn_output = cnn(x, keep_prob, training)
+        n = x
+        if batch_norm:
+            n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
+
+        cnn_output = cnn(n, keep_prob, training)
 
     # Other model components passing in output from CNN
     task_output, domain_softmax, task_loss, domain_loss, \

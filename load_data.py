@@ -327,7 +327,7 @@ def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="dat
         tfrecords_test_a, tfrecords_test_b
 
 def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
-        batch_size=1000000):
+        gpu_mem=0.8, batch_size=1000000):
     # Since we're using a .tfrecord file, we need to load the data and sum
     # how many instances of each class there are in batches
     input_fn, input_hook = _get_tfrecord_input_fn(
@@ -350,7 +350,10 @@ def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
 
     # Run on CPU since such a simple computation
     #config=tf.ConfigProto(device_count={'GPU': 0})
-    with tf.train.SingularMonitoredSession(hooks=[input_hook]) as sess:
+    config = tf.ConfigProto()
+    config.gpu_options.per_process_gpu_memory_fraction = gpu_mem
+
+    with tf.train.SingularMonitoredSession(hooks=[input_hook], config=config) as sess:
         # Continue till we've looked at all the data
         while True:
             try:

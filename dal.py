@@ -779,8 +779,8 @@ if __name__ == '__main__':
         help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
     parser.add_argument('--steps', default=100000, type=int,
         help="Number of training steps to run (default 100000)")
-    parser.add_argument('--batch', default=2048, type=int,
-        help="Batch size to use (default 128, decrease if you run out of memory)")
+    parser.add_argument('--batch', default=256, type=int,
+        help="Batch size to use (default 256, decrease if you run out of memory)")
     parser.add_argument('--lr', default=0.0003, type=float,
         help="Learning rate for training (default 0.0003)")
     parser.add_argument('--lr-mult', default=1.0, type=float,
@@ -795,10 +795,10 @@ if __name__ == '__main__':
         help="Log training losses and accuracy every so many steps (default 500)")
     parser.add_argument('--log-steps-val', default=4000, type=int,
         help="Log validation accuracy and AUC every so many steps (default 4000)")
-    parser.add_argument('--log-steps-extra', default=50000, type=int,
-        help="Log weights, plots, etc. every so many steps (default 50000)")
-    parser.add_argument('--max-examples', default=5000, type=int,
-        help="Max number of examples to evaluate for validation (default 5000)")
+    parser.add_argument('--log-steps-extra', default=100000, type=int,
+        help="Log weights, plots, etc. every so many steps (default 100000)")
+    parser.add_argument('--max-examples', default=5000000, type=int,
+        help="Max number of examples to evaluate for validation (default 5000000)")
     parser.add_argument('--max-plot-examples', default=100, type=int,
         help="Max number of examples to use for plotting (default 100)")
     parser.add_argument('--balance', dest='balance', action='store_true',

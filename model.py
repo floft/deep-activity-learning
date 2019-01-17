@@ -127,7 +127,7 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_layers = 0
 
         if use_feature_extractor:
-            num_layers = 2
+            num_layers = 3
 
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):
@@ -309,7 +309,7 @@ def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
 def build_flat(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True):
+            x_dims=None, use_feature_extractor=True, batch_norm=True):
     """ Flatten the input and pass directly to the feature extractor
 
     Note: only need x_dims in build_flat none of the other build_* since here
@@ -320,12 +320,15 @@ def build_flat(x, y, domain, grl_lambda, keep_prob, training,
     # to be [batch, time steps * features], i.e. [batch_size, -1] except Dense
     # doesn't work with size None
     with tf.variable_scope("flat_model"):
-        flat_output = tf.reshape(x, [tf.shape(x)[0], np.prod(x_dims)])
+        output = tf.reshape(x, [tf.shape(x)[0], np.prod(x_dims)])
+
+        if batch_norm:
+            output = tf.layers.batch_normalization(output, momentum=0.999, training=training)
 
     # Other model components passing in output from above
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
-            flat_output, y, domain, grl_lambda, keep_prob, training,
+            output, y, domain, grl_lambda, keep_prob, training,
             num_classes, adaptation, multi_class, class_weights,
             use_feature_extractor=use_feature_extractor)
 
@@ -627,20 +630,11 @@ def feature_attention_block(name, x, num_features, keep_prob, training, units,
     in a sentence to pay attention to for machine translation, where each word
     would have the same features, but attention was over the words not features.
     """
-    # TODO maybe add dropout #e = tf.nn.dropout(e, keep_prob)
-
     with tf.variable_scope(name):
         batch_size = tf.shape(x)[0]
 
         # Compute energies -- input is one-hot-encoded position concatenated with
         # the entire feature vector, e.g. a_1 = <(1,0,0,...,0),(all feature values)>
-        #
-        # TODO won't work since we do this in batches...
-        #positions = tf.one_hot(range(num_features), num_features) # ends up being identity matrix
-        #positions = tf.tile(tf.expand_dims(positions, axis=0), (batch_size, 1, 1)) # make length of batch
-        #features = tf.tile(tf.expand_dims(a, axis=1), (1,num_features,1))
-        #energy_input = tf.concat([positions, features], axis=2)
-        # Thus, instead...
         #
         # We do this one for each feature since we need to share FC weights and
         # if we have more than [batch,feature] dimensions for FC, it'll flatten it,
@@ -675,11 +669,6 @@ def feature_attention_block(name, x, num_features, keep_prob, training, units,
                     e_i = tf.layers.batch_normalization(e_i, training=training)
                 e_i = tf.nn.dropout(e_i, keep_prob)
 
-                # e_i = tf.contrib.layers.fully_connected(e_i, units, activation_fn=tf.nn.tanh)
-                # if batch_norm:
-                #     e_i = tf.layers.batch_normalization(e_i, training=training)
-                # e_i = tf.nn.dropout(e_i, keep_prob)
-
                 e_i = tf.contrib.layers.fully_connected(e_i, 1, activation_fn=tf.nn.relu)
 
             e.append(e_i)
@@ -705,11 +694,6 @@ def attention(x, keep_prob, training, num_features, batch_norm=True):
 
     if batch_norm:
         n = tf.layers.batch_normalization(n, training=training)
-
-    #n = feature_attention_block("a2", n, num_features, keep_prob, training, units=10)
-
-    #if batch_norm:
-    #    n = tf.layers.batch_normalization(n, training=training)
 
     return n
 

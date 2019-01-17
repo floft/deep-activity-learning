@@ -59,7 +59,7 @@ def _get_input_fn(features, labels, batch_size,
 
 def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
-        prefetch_buffer_size=1):
+        prefetch_buffer_size=1, map_first=False):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -76,8 +76,18 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         parsed = tf.parse_example(example_proto, feature_description)
         return parsed["x"], parsed["y"]
 
+    def _parse_single_function(example_proto):
+        # Parse the input tf.Example proto using the dictionary above.
+        # parse_single_example is without a batch, parse_example is with batches
+        parsed = tf.parse_single_example(example_proto, feature_description)
+        return parsed["x"], parsed["y"]
+
     def input_fn():
         dataset = tf.data.TFRecordDataset(filenames, compression_type='GZIP')
+
+        # Mapping later is faster since the later version is vectorized
+        if map_first:
+            dataset = dataset.map(_parse_single_function)
 
         if count: # only count, so no need to shuffle
             pass
@@ -86,9 +96,10 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         else: # repeat, shuffle, and batch
             dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
 
-        # Apply map after batching to reduce overhead of really quick parse function
         dataset = dataset.batch(batch_size)
-        dataset = dataset.map(_parse_function)
+
+        if not map_first:
+            dataset = dataset.map(_parse_function)
 
         # Prefetch for speed up
         # See: https://www.tensorflow.org/guide/performance/datasets
@@ -330,8 +341,10 @@ def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
         gpu_mem=0.8, batch_size=1000000):
     # Since we're using a .tfrecord file, we need to load the data and sum
     # how many instances of each class there are in batches
+    #
+    # map_first=False to speed this up
     input_fn, input_hook = _get_tfrecord_input_fn(
-        filenames, batch_size, x_dims, num_classes, count=True)
+        filenames, batch_size, x_dims, num_classes, count=True, map_first=False)
     _, next_labels_batch = input_fn()
 
     total = 0

@@ -590,11 +590,11 @@ def resnet(x, keep_prob, training, batch_norm=True):
     n = tf.expand_dims(x, -1)
 
     n = conv2d("c1", n, 8, [3,1], [1,1], "same", batch_norm, training)
-    #n = conv2d("c2", n, 8, [3,1], [2,1], "same", batch_norm, training)
+    n = conv2d("c2", n, 8, [3,1], [2,1], "same", batch_norm, training)
     #n = conv2d("c3", n, 8, [3,1], [2,1], "same", batch_norm, training)
 
     n = residual_block("r1", n, 8, training)
-    #n = residual_block("r2", n, 8, training)
+    n = residual_block("r2", n, 8, training)
 
     # TODO maybe add: n  = tf.nn.dropout(n, keep_prob)
 
@@ -605,10 +605,14 @@ def resnet(x, keep_prob, training, batch_norm=True):
 def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True):
+            x_dims=None, use_feature_extractor=True, batch_norm=True):
     """ CNN for image data rather than time-series data """
     with tf.variable_scope("resnet_model"):
-        output = resnet(x, keep_prob, training)
+        n = x
+        if batch_norm:
+            n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
+
+        output = resnet(n, keep_prob, training)
 
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(

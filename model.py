@@ -127,7 +127,7 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_layers = 0
 
         if use_feature_extractor:
-            num_layers = 3
+            num_layers = 2
 
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):

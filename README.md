@@ -9,8 +9,9 @@ Goals:
 
 Steps:
 
-- Preprocess data extracting the desired features (see *preprocessing/*)
-- Create cross validation datasets (see *datasets/*)
+- Preprocess data extracting the desired features, creating time-series windows,
+  and cross validation train/test splits (see *generate_datasets.sh*,
+  *preprocessing/*, etc.)
 - Run and compare AL (*al.py*) and DAL (*dal.py*) on the datasets
 
 ## Datasets
@@ -28,8 +29,8 @@ representations and time-series windows, and create the .tfrecord files:
 
     ./generate_datasets.sh
 
-**Note:** a lot of Bash scripts use my multi-threading/processing script
-[*/scripts/threading*](https://floft.net/code/bash-threading/) to drastically
+**Note:** a lot of the Bash scripts use my multi-threading/processing script
+[/scripts/threading](https://floft.net/code/bash-threading/) to drastically
 speed up the preprocessing, so you'll want to either remove those statements or
 download the script.
 
@@ -37,11 +38,13 @@ download the script.
 
 ### AL
 
+To train AL (uses random forests) and compute the results:
+
     ./al_results.sh
 
 ### DAL
 
-If running locally on your computer:
+If running locally on your computer, run the cross validation training:
 
     ./dal_cv.sh
 
@@ -53,5 +56,5 @@ If running on a cluster (after editing *kamiak_config.sh*):
 
 Then, to display the results:
 
-    ./dal_download_results.sh
+    ./dal_download_results.sh # edit "logs" to point to either {kamiak,cv}-logs
     ./dal_results.sh

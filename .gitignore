@@ -2,6 +2,7 @@
 *.txt
 *.hdf5
 *.tfrecord
+*.zip
 
 # Python
 *.pyc

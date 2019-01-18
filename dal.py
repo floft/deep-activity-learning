@@ -389,7 +389,8 @@ def train(
         min_domain_accuracy=0.60,
         gpu_memory=0.8,
         max_examples=5000,
-        max_plot_examples=100):
+        max_plot_examples=100,
+        regularization=False):
 
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
@@ -449,6 +450,14 @@ def train(
     feature_extractor_vars = [v for v in variables if 'feature_extractor' in v.name]
     task_classifier_vars = [v for v in variables if 'task_classifier' in v.name]
     domain_classifier_vars = [v for v in variables if 'domain_classifier' in v.name]
+
+    # If we want regularization, add it to the total loss
+    if regularization:
+        regularizer = tf.contrib.layers.l1_l2_regularizer(0.05, 0.05)
+        weights = [v for v in variables if 'weights' in v.name]
+        penalty = tf.contrib.layers.apply_regularization(regularizer, weights)
+
+        total_loss += penalty
 
     # If the discriminator has lower than a certain accuracy on classifying which
     # domain a feature output was from, then we'll train that and skip training

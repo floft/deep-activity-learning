@@ -2,13 +2,56 @@
 
 Goals:
 
- - Compare random forest activity learning (AL) with deep activity learning
- - Compare previous AL features with simpler feature vector
- - Add domain adaptation and generalization to deep network for further
-   improvement
+- Compare random forest activity learning (AL) with deep activity learning
+- Compare previous AL features with simpler feature vector
+- Add domain adaptation and generalization to deep network for further
+  improvement
 
 Steps:
 
-  - Preprocess data extracting the desired features (see *preprocessing/*)
-  - Create cross validation datasets (see *datasets/*)
-  - Run and compare AL (*al.py*) and DAL (*dal.py*) on the datasets
+- Preprocess data extracting the desired features (see *preprocessing/*)
+- Create cross validation datasets (see *datasets/*)
+- Run and compare AL (*al.py*) and DAL (*dal.py*) on the datasets
+
+## Datasets
+
+This is designed to work on smart home datasets in the formats of those on the
+CASAS website. To download some smart home data to *preprocessing/orig*, convert
+into the appropriate annotated format, and output to *preprocessing/raw*, run:
+
+    ./download_datasets.sh
+
+## Preprocessing
+
+To apply activity label and sensor translations, generate the desired feature
+representations and time-series windows, and create the .tfrecord files:
+
+    ./generate_datasets.sh
+
+**Note:** a lot of Bash scripts use my multi-threading/processing script
+[*/scripts/threading*](https://floft.net/code/bash-threading/) to drastically
+speed up the preprocessing, so you'll want to either remove those statements or
+download the script.
+
+## Running
+
+### AL
+
+    ./al_results.sh
+
+### DAL
+
+If running locally on your computer:
+
+    ./dal_cv.sh
+
+If running on a cluster (after editing *kamiak_config.sh*):
+
+    ./kamiak_upload.sh
+    ./kamiak_queue_all.sh
+    ./kamiak_tflogs.sh # on your computer, to download the logs
+
+Then, to display the results:
+
+    ./dal_download_results.sh
+    ./dal_results.sh

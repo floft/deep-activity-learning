@@ -19,3 +19,6 @@ graph.pbtxt
 
 # Processing results
 *.csv
+
+# Compiled
+convert

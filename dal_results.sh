@@ -32,8 +32,10 @@ done | awk '
     std3=sqrt((sumsq3-sum3^2/n)/n)
     std4=sqrt((sumsq4-sum4^2/n)/n)
     print "Averages over " n " homes (and each home is an average of 3-fold CV)"
-    print "Train A \t Avg: " sum1/n "\t Std: " std1
+    print "Train A* \t Avg: " sum1/n "\t Std: " std1
     print "Test A  \t Avg: " sum2/n "\t Std: " std2
-    print "Train B \t Avg: " sum3/n "\t Std: " std3
+    print "Train B* \t Avg: " sum3/n "\t Std: " std3
     print "Test B  \t Avg: " sum4/n "\t Std: " std4
+    print ""
+    print "* only on batch of 1024 examples for training sets (different than AL)"
 }'

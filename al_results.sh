@@ -26,7 +26,7 @@ awk '
     std2=sqrt((sumsq2-sum2^2/n)/n)
     std3=sqrt((sumsq3-sum3^2/n)/n)
     std4=sqrt((sumsq4-sum4^2/n)/n)
-    print "Averages over " n " runs (and each home is an average of 3-fold CV)"
+    print "Averages over " n " runs (each home is 3-fold CV)"
     print "Train A \t Avg: " sum1/n "\t Std: " std1
     print "Test A  \t Avg: " sum2/n "\t Std: " std2
     print "Train B \t Avg: " sum3/n "\t Std: " std3

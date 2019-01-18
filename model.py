@@ -80,12 +80,12 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
             classifier_output = tf.contrib.layers.fully_connected(
                     classifier_output, num_features, activation_fn=None)
 
-            if batch_norm:
-                classifier_output = tf.layers.batch_normalization(
-                    classifier_output, training=training)
-
             # Last activation is softmax, which we will apply afterwards
             if i != num_layers-1:
+                if batch_norm:
+                    classifier_output = tf.layers.batch_normalization(
+                        classifier_output, training=training)
+
                 classifier_output = tf.nn.relu(classifier_output)
                 classifier_output = tf.nn.dropout(classifier_output, keep_prob)
 

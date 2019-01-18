@@ -16,3 +16,6 @@ preprocessing/translated/model/
 *.ckpt*
 checkpoint
 graph.pbtxt
+
+# Processing results
+*.csv

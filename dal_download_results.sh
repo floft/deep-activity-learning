@@ -4,9 +4,8 @@
 # after running ./dal_cv.sh that trains the networks
 #
 results="cv-results"
-logs="cv-logs"
-models="cv-models"
-datasets=(hh{101..130})
+logs="kamiak-logs" # or cv-logs or kamiak-logs if trained locally or on Kamiak
+datasets=(hh{{101..106},{108..120},{122..130}})
 folds=({0..2})
 
 # Run tensorboard to process the logs

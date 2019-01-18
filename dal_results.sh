@@ -3,7 +3,7 @@
 # Compute results after downloading with ./dal_download_results.sh
 #
 results="cv-results"
-datasets=(hh{101..130})
+datasets=(hh{{101..106},{108..120},{122..130}})
 folds=({0..2})
 
 for target in "${datasets[@]}"; do

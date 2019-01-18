@@ -16,4 +16,5 @@ ssh "$remotessh" "mkdir -p \"$remotedir/slurm_logs\""
 
 # Copy only select files
 rsync -Pahuv --include="./" --include="*.py" --include="*.sh" --include="*.srun" \
+    --include="preprocessing/" --include="preprocessing/al-features" --include="*.config" \
     --include="$compressedDataset" --exclude="*" "$from" "$to"

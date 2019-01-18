@@ -11,7 +11,7 @@ models="cv-models"
 mem="0.2" # 0.8/4 = 0.2
 features="al"
 model="flat"
-datasets=(hh{101..130})
+datasets=(hh{{101..106},{108..120},{122..130}})
 folds=({0..2})
 
 # Do all the homes

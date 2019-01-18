@@ -287,7 +287,7 @@ def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
             n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
 
         dropout = 1-keep_prob
-        tcn = TemporalConvNet([units, units, units, units], 2, dropout)
+        tcn = TemporalConvNet([16, 32, 64], 3, dropout)
         tcn_output = tcn(n, training=training)[:, -1]
 
     # Other model components passing in output from TCN
@@ -568,7 +568,7 @@ def conv2d(name, inputs, num_outputs, kernel_size, stride, padding,
 
         conv = tf.nn.dropout(conv, keep_prob)
 
-            return conv
+        return conv
 
 def residual_block(name, inputs, num_outputs, training=False, keep_prob=1.0):
     with tf.variable_scope(name):

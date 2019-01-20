@@ -55,8 +55,7 @@ If running on a cluster (after editing *kamiak_config.sh*):
     ./kamiak_queue_all.sh flat-da --dataset=al.zip --features=al --flat --adapt
 
     # on your computer
-    ./kamiak_tflogs.sh # during training, to download the logs for monitoring
-    ./kamiak_download.sh # after training to download logs/models
+    ./kamiak_tflogs.sh # during training, to download the logs/models
 
 Then, to pick the best models based on the validation results above (unless
 using domain adaptation, then pick the last model) and evaluate on the entire

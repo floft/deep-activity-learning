@@ -14,8 +14,10 @@ for target in "${datasets[@]}"; do
             # Skip if the results weren't available (i.e. tensorboard gives 500 error)
             grep -q "500 Internal Server Error" "$f" && continue
 
-            #echo -en "$f\t"
+            # The last value
             tail -n 1 "$f" | cut -d',' -f3
+            # The highest value
+            #tail -n +2 "$f" | cut -d',' -f3 | sort -n | tail -n 1
         done
     done
 done | awk '

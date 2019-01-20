@@ -52,9 +52,12 @@ If running on a cluster (after editing *kamiak_config.sh*):
 
     ./kamiak_upload.sh
     ./kamiak_queue_all.sh
-    ./kamiak_tflogs.sh # on your computer, to download the logs
 
-Then, to display the results:
+    # on your computer
+    ./kamiak_tflogs.sh # during training, to download the logs for monitoring
+    ./kamiak_download.sh # after training to download logs/models
 
-    ./dal_download_results.sh # edit "logs" to point to either {kamiak,cv}-logs
-    ./dal_results.sh
+Then, to pick the best models based on the validation results above and evaluate
+on the entire train and test sets for comparison with AL:
+
+    ./dal_results.sh # edit "from" to point to either kamiak or cv

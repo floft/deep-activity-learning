@@ -24,7 +24,7 @@
 
 first_arg=$1
 if [[ -z $first_arg ]]; then
-    echo "Specify what method and dataset to use, e.g. --vrnn-da --trivial"
+    echo "Specify what method to use, e.g. --flat"
     exit 1
 else
     echo "Args: $@"

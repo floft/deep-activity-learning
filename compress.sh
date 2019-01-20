@@ -3,7 +3,7 @@
 # Compress all the files for each dataset
 #
 c() {
-    zip datasets/$1.zip datasets/${1}_* datasets/${1}.config
+    zip $1.zip datasets/${1}_* datasets/${1}.config
 }
 
 c "al"

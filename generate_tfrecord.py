@@ -152,7 +152,7 @@ def generate_tfrecords(inputs="preprocessing/windows",
             seed += 2
 
     # Process them all
-    run_job_pool(process_fold, commands)
+    run_job_pool(process_fold, commands, desc=prefix)
 
 def generate_tfrecords_sample(files, inputs="preprocessing/windows",
         outputs="datasets"):

@@ -51,7 +51,7 @@ If running locally on your computer, run the cross validation training:
 If running on a cluster (after editing *kamiak_config.sh*):
 
     ./kamiak_upload.sh
-    ./kamiak_queue_all.sh
+    ./kamiak_queue_all.sh flat --dataset=al.zip --features=al --flat
 
     # on your computer
     ./kamiak_tflogs.sh # during training, to download the logs for monitoring

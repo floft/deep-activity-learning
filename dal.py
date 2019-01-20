@@ -230,6 +230,7 @@ def metric_summaries(domain,
     and per-class accuracy differs for multi-class vs. single-class predictions.
     """
     summs = [[] for d in datasets]
+    summs_values = {}
 
     with tf.variable_scope("metrics_%s" % domain):
         # Depending on if multi-class, what we consider a positive class is different
@@ -284,6 +285,10 @@ def metric_summaries(domain,
             tf.summary.scalar("accuracy_task/%s/%s" % (domain, dataset), task_acc),
             tf.summary.scalar("accuracy_domain/%s/%s" % (domain, dataset), domain_acc),
         ]
+
+        summs_values["auc_task/%s/%s" % (domain, dataset)] = task_auc
+        summs_values["accuracy_task/%s/%s" % (domain, dataset)] = task_acc
+        summs_values["accuracy_domain/%s/%s" % (domain, dataset)] = domain_acc
 
     # Per-class metrics
     for i in range(num_classes):
@@ -340,7 +345,13 @@ def metric_summaries(domain,
                 tf.summary.scalar("rates_class_%s/FN/%s/%s" % (class_name,domain,dataset), fn),
             ]
 
-    return reset_metrics, update_metrics, summs
+            summs_values["accuracy_task_class_%s/%s/%s" % (class_name,domain,dataset)] = acc
+            summs_values["rates_class_%s/TP/%s/%s" % (class_name,domain,dataset)] = tp
+            summs_values["rates_class_%s/FP/%s/%s" % (class_name,domain,dataset)] = fp
+            summs_values["rates_class_%s/TN/%s/%s" % (class_name,domain,dataset)] = tn
+            summs_values["rates_class_%s/FN/%s/%s" % (class_name,domain,dataset)] = fn
+
+    return reset_metrics, update_metrics, summs, summs_values
 
 def opt_with_summ(optimizer, loss, var_list=None):
     """
@@ -412,7 +423,7 @@ def train(
             tfrecords_train_b, batch_size, x_dims, num_classes)
         next_data_batch_b, next_labels_batch_b = input_fn_b()
 
-    # Load all the test data in one batch (we'll assume test set is small for now)
+    # Load all the test data in one batch
     with tf.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
             tfrecords_test_a, batch_size, x_dims, num_classes, evaluation=True)
@@ -495,13 +506,13 @@ def train(
     # run and log the summaries.
     train_a_summs = [tf.summary.scalar("loss/total_loss", total_loss)]
 
-    reset_a, update_metrics_a, summs = metric_summaries(
+    reset_a, update_metrics_a, summs, _ = metric_summaries(
         "source", y, task_classifier, domain, domain_classifier,
         num_classes, multi_class, config)
     train_a_summs += summs[0]
     val_a_summs = summs[1]
 
-    reset_b, update_metrics_b, summs = metric_summaries(
+    reset_b, update_metrics_b, summs, _ = metric_summaries(
         "target", y, task_classifier, domain, domain_classifier,
         num_classes, multi_class, config)
     train_b_summs = summs[0]
@@ -762,7 +773,7 @@ if __name__ == '__main__':
         help="Directory for saving model files")
     parser.add_argument('--logdir', default="logs", type=str,
         help="Directory for saving log files")
-    parser.add_argument('--da', dest='adaptation', action='store_true',
+    parser.add_argument('--adapt', dest='adaptation', action='store_true',
         help="Perform domain adaptation on the model")
     parser.add_argument('--lstm', dest='lstm', action='store_true',
         help="Use LSTM model")
@@ -789,21 +800,21 @@ if __name__ == '__main__':
     parser.add_argument('--steps', default=100000, type=int,
         help="Number of training steps to run (default 100000)")
     parser.add_argument('--batch', default=1024, type=int,
-        help="Batch size to use (default 1025, decrease if you run out of memory)")
+        help="Batch size to use (default 1024, decrease if you run out of memory)")
     parser.add_argument('--lr', default=0.0001, type=float,
         help="Learning rate for training (default 0.0003)")
     parser.add_argument('--lr-mult', default=1.0, type=float,
         help="Multiplier for extra discriminator training learning rate (default 1.0)")
     parser.add_argument('--dropout', default=0.8, type=float,
         help="Keep probability for dropout (default 0.8)")
-    parser.add_argument('--gpu-mem', default=0.1, type=float,
-        help="Percentage of GPU memory to let TensorFlow use (default 0.1, max ~0.8)")
-    parser.add_argument('--model-steps', default=4000, type=int,
-        help="Save the model every so many steps (default 4000)")
+    parser.add_argument('--gpu-mem', default=0.4, type=float,
+        help="Percentage of GPU memory to let TensorFlow use (default 0.4, max ~0.8)")
+    parser.add_argument('--model-steps', default=1000, type=int,
+        help="Save the model every so many steps (default 1000)")
     parser.add_argument('--log-steps', default=500, type=int,
         help="Log training losses and accuracy every so many steps (default 500)")
-    parser.add_argument('--log-steps-val', default=4000, type=int,
-        help="Log validation accuracy and AUC every so many steps (default 4000)")
+    parser.add_argument('--log-steps-val', default=1000, type=int,
+        help="Log validation accuracy and AUC every so many steps (default 1000)")
     parser.add_argument('--log-steps-extra', default=100000, type=int,
         help="Log weights, plots, etc. every so many steps (default 100000)")
     parser.add_argument('--max-examples', default=5000000, type=int,
@@ -844,8 +855,15 @@ if __name__ == '__main__':
         +str(len(al_config.labels))+" vs. "+str(tfrecord_config.num_classes)
 
     tfrecords_train_a, tfrecords_train_b, \
-    tfrecords_test_a, tfrecords_test_b = \
+    tfrecords_valid_a, tfrecords_valid_b, \
+    _, _ = \
         get_tfrecord_datasets(args.features, args.target, args.fold, args.sample)
+
+    # We'll test on the validation set actually, then in dal_eval.py evaluate
+    # on the real test set. In dal_eval.py we'll pick the model that had the
+    # highest accuracy on the validation set.
+    tfrecords_test_a = tfrecords_valid_a
+    tfrecords_test_b = tfrecords_valid_b
 
     # Calculate class imbalance using labeled training data (i.e. from domain A)
     if args.balance:

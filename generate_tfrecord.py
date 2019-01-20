@@ -8,6 +8,7 @@ memory all at once thus allowing us to process larger datasets.
 """
 import os
 import copy
+import math
 import pathlib
 import numpy as np
 import tensorflow as tf
@@ -39,7 +40,8 @@ def write_tfrecord_config(filename, num_features, num_classes, time_steps, x_dim
         f.write("time_steps "+str(time_steps)+"\n")
         f.write("x_dims "+" ".join([str(x) for x in x_dims])+"\n")
 
-def process_fold(filename, fold, name, num_classes, outputs, seed, sample=False):
+def process_fold(filename, fold, name, num_classes, outputs, seed,
+    separate_valid=True, valid_amount=0.2, sample=False):
     data = load_hdf5(filename)
     index_one = False # Labels start from 0
 
@@ -55,12 +57,29 @@ def process_fold(filename, fold, name, num_classes, outputs, seed, sample=False)
     train_data = train_data[p]
     train_labels = train_labels[p]
 
+    # Split out valid data
+    if separate_valid:
+        training_end = math.ceil((1-valid_amount)*len(train_data))
+
+        valid_data = train_data[training_end:]
+        valid_labels = train_labels[training_end:]
+        train_data = train_data[:training_end]
+        train_labels = train_labels[:training_end]
+
     if sample:
         train_data = train_data[:2000]
         train_labels = train_labels[:2000]
 
+        if separate_valid:
+            valid_data = valid_data[:2000]
+            valid_labels = valid_labels[:2000]
+
     train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
     write_tfrecord(train_filename, train_data, train_labels)
+
+    if separate_valid:
+        valid_filename = os.path.join(outputs, name+"_valid_"+fold+".tfrecord")
+        write_tfrecord(valid_filename, valid_data, valid_labels)
 
     #
     # Test data

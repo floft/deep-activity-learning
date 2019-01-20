@@ -3,6 +3,7 @@
 *.hdf5
 *.tfrecord
 *.zip
+*.bak
 
 # Python
 *.pyc

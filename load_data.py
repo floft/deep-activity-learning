@@ -331,10 +331,13 @@ def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="dat
     """ Get all the train/test A/B .tfrecord files """
     tfrecords_train_a, tfrecords_train_b = \
         get_tfrecord_traintest_datasets(feature_set, target, fold, "train", sample, dir_name)
+    tfrecords_valid_a, tfrecords_valid_b = \
+        get_tfrecord_traintest_datasets(feature_set, target, fold, "valid", sample, dir_name)
     tfrecords_test_a, tfrecords_test_b = \
         get_tfrecord_traintest_datasets(feature_set, target, fold, "test", sample, dir_name)
 
     return tfrecords_train_a, tfrecords_train_b, \
+        tfrecords_valid_a, tfrecords_valid_b, \
         tfrecords_test_a, tfrecords_test_b
 
 def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,

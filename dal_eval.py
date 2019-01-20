@@ -143,7 +143,8 @@ def last_modified(dir_name, glob):
     return None
 
 def process_model(model_dir, log_dir, features, target, fold, al_config,
-        gpu_mem, bidirectional, batch, units, feature_extractor, adaptation):
+        gpu_mem, bidirectional, batch, units, feature_extractor, adaptation,
+        last):
     print("Processing target", target, "fold", fold, "using model", model)
 
     # In case a previous run still has the model in memory, reset graph.
@@ -188,8 +189,12 @@ def process_model(model_dir, log_dir, features, target, fold, al_config,
             if v.tag == 'accuracy_task/source/validation':
                 task_accuracy.append((e.step, v.simple_value))
 
-    # Sort by accuracy
-    task_accuracy.sort(key=lambda tup: tup[1])
+    # Sort by accuracy -- but only if we didn't choose to use the last model.
+    # In that case, the ...[-1] will pick the last one, so all we have to do
+    # is not sort this.
+    if not last:
+        task_accuracy.sort(key=lambda tup: tup[1])
+
     max_accuracy = task_accuracy[-1][1]
     max_accuracy_step = task_accuracy[-1][0]
 
@@ -237,6 +242,8 @@ if __name__ == '__main__':
         help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
     parser.add_argument('--jobs', default=8, type=int,
         help="Number of TensorFlow jobs to run at once (default 8)")
+    parser.add_argument('--last', dest='last', action='store_true',
+        help="Use last model rather than one with best validation set performance")
     parser.add_argument('--units', default=100, type=int,
         help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
     parser.add_argument('--batch', default=1024, type=int,
@@ -249,7 +256,7 @@ if __name__ == '__main__':
         help="Use a feature extractor before task classifier/domain predictor (default)")
     parser.add_argument('--no-feature-extractor', dest='feature_extractor', action='store_false',
         help="Do not use a feature extractor")
-    parser.set_defaults(bidirectional=False, feature_extractor=True, debug=False)
+    parser.set_defaults(bidirectional=False, feature_extractor=True, debug=False, last=False)
     args = parser.parse_args()
 
     # Load datasets
@@ -290,7 +297,7 @@ if __name__ == '__main__':
     for log_dir, model_dir, target, model, fold, adaptation in models_to_evaluate:
         commands.append((model_dir, log_dir, args.features, target, fold, al_config,
             gpu_mem, args.bidirectional, args.batch, args.units,
-            args.feature_extractor, adaptation))
+            args.feature_extractor, adaptation, args.last))
 
     results = run_job_pool(process_model, commands, cores=args.jobs)
 

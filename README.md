@@ -52,12 +52,15 @@ If running on a cluster (after editing *kamiak_config.sh*):
 
     ./kamiak_upload.sh
     ./kamiak_queue_all.sh flat --dataset=al.zip --features=al --flat
+    ./kamiak_queue_all.sh flat-da --dataset=al.zip --features=al --flat --adapt
 
     # on your computer
     ./kamiak_tflogs.sh # during training, to download the logs for monitoring
     ./kamiak_download.sh # after training to download logs/models
 
-Then, to pick the best models based on the validation results above and evaluate
-on the entire train and test sets for comparison with AL:
+Then, to pick the best models based on the validation results above (unless
+using domain adaptation, then pick the last model) and evaluate on the entire
+train and test sets for comparison with AL:
 
-    ./dal_results.sh # edit "from" to point to either kamiak or cv
+    ./dal_results.sh flat --features=al # set "from" to either kamiak or cv
+    ./dal_results.sh flat-da --features=al --last

@@ -10,6 +10,7 @@ to="$localdir"
 
 # Logs, models, images
 rsync -Pahuv \
+    --include="dal_results_*.txt" \
     --include="$logFolder*/" --include="$logFolder*/*" --include="$logFolder*/*/*" \
     --include="$modelFolder*/" --include="$modelFolder*/*" --include="$modelFolder*/*/*" \
     --exclude="*" "$from" "$to"

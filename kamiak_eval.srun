@@ -1,0 +1,111 @@
+#!/bin/bash
+#SBATCH --job-name=DALEVAL
+#SBATCH --output=slurm_logs/daldeval_%j.out
+#SBATCH --error=slurm_logs/daldeval_%j.err
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --nodes=1-1
+#SBATCH --gres=gpu:tesla:1
+#SBATCH --partition=taylor,cahnrs_gpu,free_gpu,kamiak,vcea,cahnrs,cahnrs_bigmem
+#SBATCH --time=0-2:00:00
+#SBATCH --mem=20G
+
+#
+# This is a version of dal_results.sh but for running on Kamiak
+#
+
+. kamiak_config.sh
+
+#
+# ---
+#
+
+suffix="$1"
+if [[ -z $suffix ]]; then
+    echo "Usage: sbatch kamiak_eval.srun flat --dataset=al.zip --features=al"
+    exit 1
+else
+    echo "Args: $@"
+fi
+shift
+
+# Allow overriding the dataset zip file with --dataset=... etc.
+# Other args are passed directly to the Python program.
+program_args=()
+for i; do
+    name="$(cut -d'=' -f1 <<< "$i")"
+    value="$(cut -d'=' -f2 <<< "$i")"
+
+    if [[ "$name" == "--dataset" ]]; then
+        compressedDataset="$value"
+        echo "Overriding dataset to be: $compressedDataset"
+    else
+        program_args+=("$i")
+    fi
+
+    shift
+done
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+module load cuda/9.0.176 cudnn/7.1.2_cuda9.0 python3/3.5.0
+data="$remotedir"
+
+handle_terminate() {
+    echo "Sigterm or sigint -- exiting"
+    cleanup
+    exit 1
+}
+
+# Remove workspace at the end, end all remaining processes
+cleanup() {
+    rmworkspace -a -f --name="$SCRATCHDIR"
+}
+
+# Create a scratch workspace
+SCRATCHDIR="$(mkworkspace -q -t 7-00:00 -b /local)" # 7 days
+trap 'handle_terminate' SIGTERM SIGINT
+
+echo "Scratch space: $SCRATCHDIR"
+echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"
+echo "SLURM_JOB_GPUS: $SLURM_JOB_GPUS"
+
+# This is somewhat sensitive data
+chmod 0700 "$SCRATCHDIR"
+
+# Get data
+echo "Getting data: started"
+cd "$SCRATCHDIR"
+echo " - program"
+cp -a "$data"/*.py .
+echo " - dataset"
+cp -a "$data/$compressedDataset" .
+unzip "$compressedDataset"
+echo " - config file"
+mkdir -p preprocessing/al-features/
+cp -a "$data/preprocessing/al-features/al.config" preprocessing/al-features/
+echo "Getting data: done"
+
+# Install dependencies
+echo "Making sure TensorFlow installed: starting"
+pip install --user tensorflow-gpu pillow lxml jupyter matplotlib pandas sklearn scipy tqdm
+echo "Making sure TensorFlow installed: done"
+
+# Evaluate
+echo "Evaluating network: started"
+
+from="kamiak"
+models="$data/$from-models-$suffix"
+logs="$data/$from-logs-$suffix"
+out="$data/dal_results_$suffix.txt"
+
+echo "Args: ${program_args[@]}" > "$out"
+./dal_eval.py --gpu-mem=0.9 --modeldir="$models" --logdir="$logs" \
+    "${program_args[@]}" | \
+    tee -a "$out"
+
+echo "Evaluating network: done"
+
+# Cleanup
+echo "Deleting workspace: started"
+cleanup
+echo "Deleting workspace: done"

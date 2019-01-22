@@ -30,9 +30,8 @@ else
     echo "Args: $@"
 fi
 
-# Allow overriding the dataset zip file with --dataset=... or additionally
-# the --logdir=..., --modeldir=..., and --imgdir=... Any other args (e.g.
-# --vrada-da) are passed directly to the Python program.
+# Allow overriding the dataset zip file with --dataset=... etc.
+# Other args are passed directly to the Python program.
 program_args=()
 for i; do
     name="$(cut -d'=' -f1 <<< "$i")"
@@ -58,15 +57,48 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 module load cuda/9.0.176 cudnn/7.1.2_cuda9.0 python3/3.5.0
 data="$remotedir"
 
-function clean_up
-{
+# If an error occurs on one fold, kill the rest so we know it errored
+# before we wait hours and have to start the job again
+thread_kill() {
+    local t
+
+    for t; do
+        kill $t &>/dev/null
+    done
+
+    wait
+}
+
+thread_list=()
+handle_error() {
+    echo "Error occured -- exiting"
+
+    # However, we're in a subprocess and we can't tell the parent process via
+    # any variable to exit 1, thus let's just kill the parent process, which
+    # will signal handle_terminate() that then cleans up and exits with 1
+    # You'll know it's because of handle_error if you see both the "Error ..."
+    # and "Sigterm ..." messages output to the log file. Slurm will report
+    # FAILED, which makes it easy to identify jobs with a problem. The top
+    # of the .out log file lists the arguments, so re-run the job with those
+    # arguments.
+    kill $$
+}
+
+handle_terminate() {
+    echo "Sigterm or sigint -- exiting"
+    thread_kill "${thread_list[@]}"
+    cleanup
+    exit 1
+}
+
+# Remove workspace at the end, end all remaining processes
+cleanup() {
     rmworkspace -a -f --name="$SCRATCHDIR"
-    exit
 }
 
 # Create a scratch workspace
 SCRATCHDIR="$(mkworkspace -q -t 7-00:00 -b /local)" # 7 days
-trap 'clean_up' EXIT
+trap 'handle_terminate' SIGTERM SIGINT
 
 echo "Scratch space: $SCRATCHDIR"
 echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"
@@ -99,16 +131,23 @@ echo "Making sure TensorFlow installed: done"
 # Train
 echo "Training network: started"
 mkdir -p "$data/$logFolder/" # log dir, rsync this to view with TensorBoard
+
 python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
-    --debug-num=0 --fold=0 --gpu-mem=0.3 "${program_args[@]}" &
+    --debug-num=0 --fold=0 --gpu-mem=0.3 "${program_args[@]}" || handle_error &
+thread_list+=("$!")
+
 python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
-    --debug-num=1 --fold=1 --gpu-mem=0.3 "${program_args[@]}" &
+    --debug-num=1 --fold=1 --gpu-mem=0.3 "${program_args[@]}" || handle_error &
+thread_list+=("$!")
+
 python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
-    --debug-num=2 --fold=2 --gpu-mem=0.3 "${program_args[@]}" &
+    --debug-num=2 --fold=2 --gpu-mem=0.3 "${program_args[@]}" || handle_error &
+thread_list+=("$!")
+
 wait
 echo "Training network: done"
 
 # Cleanup
 echo "Deleting workspace: started"
-clean_up
+cleanup
 echo "Deleting workspace: done"

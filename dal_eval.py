@@ -195,6 +195,9 @@ def process_model(model_dir, log_dir, features, target, fold, al_config,
     if not last:
         task_accuracy.sort(key=lambda tup: tup[1])
 
+    assert len(task_accuracy) > 0, \
+        "task_accuracy empty for log"+logfile+": "+str(task_accuracy)
+
     max_accuracy = task_accuracy[-1][1]
     max_accuracy_step = task_accuracy[-1][0]
 

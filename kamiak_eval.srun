@@ -7,7 +7,7 @@
 #SBATCH --nodes=1-1
 #SBATCH --gres=gpu:tesla:1
 #SBATCH --partition=taylor,cahnrs_gpu,free_gpu,kamiak,vcea,cahnrs,cahnrs_bigmem
-#SBATCH --time=0-2:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=20G
 
 #

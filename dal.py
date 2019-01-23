@@ -838,12 +838,12 @@ if __name__ == '__main__':
         help="Keep probability for dropout (default 0.8)")
     parser.add_argument('--gpu-mem', default=0.4, type=float,
         help="Percentage of GPU memory to let TensorFlow use (default 0.4, max ~0.8)")
-    parser.add_argument('--model-steps', default=2000, type=int,
-        help="Save the model every so many steps (default 2000)")
+    parser.add_argument('--model-steps', default=4000, type=int,
+        help="Save the model every so many steps (default 4000)")
     parser.add_argument('--log-steps', default=500, type=int,
         help="Log training losses and accuracy every so many steps (default 500)")
-    parser.add_argument('--log-steps-val', default=2000, type=int,
-        help="Log validation accuracy and AUC every so many steps (default 2000)")
+    parser.add_argument('--log-steps-val', default=4000, type=int,
+        help="Log validation accuracy and AUC every so many steps (default 4000)")
     parser.add_argument('--log-steps-extra', default=100000, type=int,
         help="Log weights, plots, etc. every so many steps (default 100000)")
     parser.add_argument('--max-examples', default=0, type=int,

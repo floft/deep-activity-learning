@@ -15,7 +15,7 @@ preprocessing/translated/model/
 # TensorFlow
 *.tfevents*
 *.ckpt*
-checkpoint
+checkpoint*
 graph.pbtxt
 
 # Processing results

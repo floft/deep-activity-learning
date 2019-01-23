@@ -40,8 +40,63 @@ def write_tfrecord_config(filename, num_features, num_classes, time_steps, x_dim
         f.write("time_steps "+str(time_steps)+"\n")
         f.write("x_dims "+" ".join([str(x) for x in x_dims])+"\n")
 
+def calculate_normalization_minmax(data):
+    """
+    Reshape from (examples, time step, features) to be (examples*time, features)
+    and then find the min/max for each feature over all examples/time steps.
+    """
+    assert len(data.shape) == 3, "normalizing data shape: (examples, times, features)"
+    data = data.reshape([data.shape[0]*data.shape[1], data.shape[2]])
+    feature_mins = np.expand_dims(np.min(data, axis=0), axis=0)
+    feature_maxs = np.expand_dims(np.max(data, axis=0), axis=0)
+    return feature_mins, feature_maxs
+
+def apply_normalization_minmax(data, norms):
+    """
+    Normalization: (X - min X) / (max X - min X) - 0.5
+    See: https://datascience.stackexchange.com/a/13221
+
+    Though, we set to 0 if it would divide by zero (i.e. all values of a feature
+    are the same, so might as well set them all to zero by setting as 0.5-0.5).
+    This basically ignores features in the test set for which in the training set
+    they are all the same.
+    See: https://stackoverflow.com/a/37977222
+    """
+    numerator = data - norms[0]
+    denominator = norms[1] - norms[0]
+    divided = np.divide(numerator, denominator,
+        out=np.ones_like(numerator)*0.5, where=denominator!=0)
+    return divided - 0.5
+
+def calculate_normalization_meanstd(data):
+    """
+    Reshape from (examples, time step, features) to be (examples*time, features)
+    and then find the mean/std for each feature over all examples/time steps.
+    """
+    assert len(data.shape) == 3, "normalizing data shape: (examples, times, features)"
+    data = data.reshape([data.shape[0]*data.shape[1], data.shape[2]])
+    feature_mean = np.expand_dims(np.mean(data, axis=0), axis=0)
+    feature_std = np.expand_dims(np.std(data, axis=0), axis=0)
+    return feature_mean, feature_std
+
+def apply_normalization_meanstd(data, norms):
+    """
+    Normalization: (X - mu) / sigma
+
+    Though, we set to 0 if it would divide by zero (i.e. all values of a feature
+    are the same, so might as well set them all to zero by setting as 0).
+    This basically ignores features in the test set for which in the training set
+    they are all the same.
+    See: https://stackoverflow.com/a/37977222
+    """
+    numerator = data - norms[0]
+    denominator = norms[1]
+    divided = np.divide(numerator, denominator,
+        out=np.zeros_like(numerator), where=denominator!=0)
+    return divided
+
 def process_fold(filename, fold, name, num_classes, outputs, seed,
-    separate_valid=True, valid_amount=0.2, sample=False):
+    separate_valid=True, valid_amount=0.2, sample=False, normalize=False):
     data = load_hdf5(filename)
     index_one = False # Labels start from 0
 
@@ -56,6 +111,14 @@ def process_fold(filename, fold, name, num_classes, outputs, seed,
     p = shuffle_together_calc(len(train_labels), seed=seed)
     train_data = train_data[p]
     train_labels = train_labels[p]
+
+    # Note: don't normalize by default since it ends up working better using
+    # batch norm to learn a normalization of the input data. This is true on the
+    # source domain and it ends up generalizing better to the target domain.
+    if normalize:
+        # Calculate before we split out the validation set
+        norms = calculate_normalization_meanstd(train_data)
+        train_data = apply_normalization_meanstd(train_data, norms)
 
     # Split out valid data
     if separate_valid:
@@ -86,6 +149,11 @@ def process_fold(filename, fold, name, num_classes, outputs, seed,
     #
     test_data = np.array(data[fold]["features_test"])
     test_labels = np.array(data[fold]["labels_test"])
+
+    if normalize:
+        # Apply the same normalization as from the training data, since we
+        # can't "peak" at the testing data even for normalization
+        test_data = apply_normalization_meanstd(test_data, norms)
 
     if sample:
         test_data = test_data[:1000]
@@ -172,15 +240,15 @@ if __name__ == "__main__":
     generate_config("al")
     generate_tfrecords(prefix="al")
 
-    generate_config("simple")
-    generate_tfrecords(prefix="simple")
+    # generate_config("simple")
+    # generate_tfrecords(prefix="simple")
 
-    generate_config("simple2")
-    generate_tfrecords(prefix="simple2")
+    # generate_config("simple2")
+    # generate_tfrecords(prefix="simple2")
 
-    # small-sample test (should overfit well to this -- a sanity check)
-    generate_tfrecords_sample([
-        "al_hh101", "al_hh102",
-        "simple_hh101", "simple_hh102",
-        "simple2_hh101", "simple2_hh102",
-    ])
+    # # small-sample test (should overfit well to this -- a sanity check)
+    # generate_tfrecords_sample([
+    #     "al_hh101", "al_hh102",
+    #     "simple_hh101", "simple_hh102",
+    #     "simple2_hh101", "simple2_hh102",
+    # ])

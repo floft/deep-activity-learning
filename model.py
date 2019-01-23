@@ -278,12 +278,12 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
 def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True, batch_norm=True):
+            x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ TCN as an alternative to using RNNs """
     # Build TCN
     with tf.variable_scope("tcn_model"):
         n = x
-        if batch_norm:
+        if initial_batch_norm:
             n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
 
         dropout = 1-keep_prob
@@ -313,7 +313,7 @@ def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
 def build_flat(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True, batch_norm=True):
+            x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ Flatten the input and pass directly to the feature extractor
 
     Note: only need x_dims in build_flat none of the other build_* since here
@@ -326,7 +326,7 @@ def build_flat(x, y, domain, grl_lambda, keep_prob, training,
     with tf.variable_scope("flat_model"):
         output = tf.reshape(x, [tf.shape(x)[0], np.prod(x_dims)])
 
-        if batch_norm:
+        if initial_batch_norm:
             output = tf.layers.batch_normalization(output, momentum=0.999, training=training)
 
     # Other model components passing in output from above
@@ -520,13 +520,13 @@ def cnn(x, keep_prob, training, batch_norm=True):
 def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True, batch_norm=True):
+            x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ CNN but 1-dimensional along the width since not really any relation
     in proximity/ordering of sensors """
     # Build CNN
     with tf.variable_scope("cnn_model"):
         n = x
-        if batch_norm:
+        if initial_batch_norm:
             n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
 
         cnn_output = cnn(n, keep_prob, training)
@@ -605,11 +605,11 @@ def resnet(x, keep_prob, training, batch_norm=True):
 def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
             num_classes, num_features, adaptation, units,
             multi_class=False, bidirectional=False, class_weights=1.0,
-            x_dims=None, use_feature_extractor=True, batch_norm=True):
+            x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ CNN for image data rather than time-series data """
     with tf.variable_scope("resnet_model"):
         n = x
-        if batch_norm:
+        if initial_batch_norm:
             n = tf.layers.batch_normalization(n, momentum=0.999, training=training)
 
         output = resnet(n, keep_prob, training)
@@ -696,10 +696,10 @@ def feature_attention_block(name, x, num_features, keep_prob, training, units,
 
     return c
 
-def attention(x, keep_prob, training, num_features, batch_norm=True):
+def attention(x, keep_prob, training, num_features, initial_batch_norm=True, batch_norm=True):
     n = x
 
-    if batch_norm:
+    if initial_batch_norm:
         n = tf.layers.batch_normalization(n, training=training)
 
     n = feature_attention_block("a1", n, num_features, keep_prob, training, units=10)

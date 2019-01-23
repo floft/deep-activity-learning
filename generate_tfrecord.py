@@ -240,15 +240,15 @@ if __name__ == "__main__":
     generate_config("al")
     generate_tfrecords(prefix="al")
 
-    # generate_config("simple")
-    # generate_tfrecords(prefix="simple")
+    generate_config("simple")
+    generate_tfrecords(prefix="simple")
 
-    # generate_config("simple2")
-    # generate_tfrecords(prefix="simple2")
+    generate_config("simple2")
+    generate_tfrecords(prefix="simple2")
 
-    # # small-sample test (should overfit well to this -- a sanity check)
-    # generate_tfrecords_sample([
-    #     "al_hh101", "al_hh102",
-    #     "simple_hh101", "simple_hh102",
-    #     "simple2_hh101", "simple2_hh102",
-    # ])
+    # small-sample test (should overfit well to this -- a sanity check)
+    generate_tfrecords_sample([
+        "al_hh101", "al_hh102",
+        "simple_hh101", "simple_hh102",
+        "simple2_hh101", "simple2_hh102",
+    ])

@@ -38,7 +38,7 @@ def run_eval(
         bidirectional=False,
         class_weights=1.0,
         gpu_memory=0.8,
-        max_examples=10000000): # essentially *all* the examples
+        max_examples=0): # 0 = all examples
     # Input training data
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(

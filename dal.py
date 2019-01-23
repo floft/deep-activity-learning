@@ -39,7 +39,7 @@ def update_metrics_on_val(sess,
     we don't run out of memory
 
     Note: if max_examples is less than the total number of validation examples,
-    it'll take the first max_examples.
+    it'll take the first max_examples. If it's zero, it'll evaluate all.
     """
     # Keep track of how many samples we've evaluated so far
     examples = 0
@@ -52,7 +52,9 @@ def update_metrics_on_val(sess,
     # We'll break if we either evaluate all of the evaluation data and thus
     # get the out of range TensorFlow exception or of we have now evaluated
     # at least the number we wanted to.
-    while examples < max_examples:
+    #
+    # Evaluate all if max_examples == 0
+    while max_examples == 0 or examples < max_examples:
         try:
             # Get next evaluation batch
             eval_data_a, eval_labels_a, eval_data_b, eval_labels_b = sess.run([
@@ -61,15 +63,18 @@ def update_metrics_on_val(sess,
             ])
 
             # Make sure we don't go over the desired number of examples
-            diff = max_examples - examples
+            # But, only if we don't want to evaluate all examples (i.e. if
+            # max_examples == 0)
+            if max_examples != 0:
+                diff = max_examples - examples
 
-            if examples + eval_data_a.shape[0] > max_examples:
-                eval_data_a = eval_data_a[:diff]
-                eval_labels_a = eval_labels_a[:diff]
+                if examples + eval_data_a.shape[0] > max_examples:
+                    eval_data_a = eval_data_a[:diff]
+                    eval_labels_a = eval_labels_a[:diff]
 
-            if examples + eval_data_b.shape[0] > max_examples:
-                eval_data_b = eval_data_b[:diff]
-                eval_labels_b = eval_labels_b[:diff]
+                if examples + eval_data_b.shape[0] > max_examples:
+                    eval_data_b = eval_data_b[:diff]
+                    eval_labels_b = eval_labels_b[:diff]
 
             examples += eval_data_a.shape[0]
 
@@ -399,7 +404,7 @@ def train(
         plot_gradients=False,
         min_domain_accuracy=0.60,
         gpu_memory=0.8,
-        max_examples=5000,
+        max_examples=0,
         max_plot_examples=100,
         regularization=False):
 
@@ -817,8 +822,8 @@ if __name__ == '__main__':
         help="Log validation accuracy and AUC every so many steps (default 2000)")
     parser.add_argument('--log-steps-extra', default=100000, type=int,
         help="Log weights, plots, etc. every so many steps (default 100000)")
-    parser.add_argument('--max-examples', default=5000000, type=int,
-        help="Max number of examples to evaluate for validation (default 5000000)")
+    parser.add_argument('--max-examples', default=0, type=int,
+        help="Max number of examples to evaluate for validation (default 0, i.e. all)")
     parser.add_argument('--max-plot-examples', default=100, type=int,
         help="Max number of examples to use for plotting (default 100)")
     parser.add_argument('--balance', dest='balance', action='store_true',
@@ -827,6 +832,8 @@ if __name__ == '__main__':
         help="Do not weight loss function with high class imbalances")
     parser.add_argument('--sample', dest='sample', action='store_true',
         help="Only use a small amount of data for training/testing")
+    parser.add_argument('--test', dest='test', action='store_true',
+        help="Swap out validation data for real test data (debugging in tensorboard)")
     parser.add_argument('--balance-pow', default=1.0, type=float,
         help="For increased balancing, raise weights to a specified power (default 1.0)")
     parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
@@ -843,7 +850,7 @@ if __name__ == '__main__':
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
         resnet=False, attention=False,
-        adaptation=False, balance=True, sample=False,
+        adaptation=False, balance=True, sample=False, test=False,
         bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
@@ -856,14 +863,17 @@ if __name__ == '__main__':
 
     tfrecords_train_a, tfrecords_train_b, \
     tfrecords_valid_a, tfrecords_valid_b, \
-    _, _ = \
+    tfrecords_test_a, tfrecords_test_b = \
         get_tfrecord_datasets(args.features, args.target, args.fold, args.sample)
 
     # We'll test on the validation set actually, then in dal_eval.py evaluate
     # on the real test set. In dal_eval.py we'll pick the model that had the
     # highest accuracy on the validation set.
-    tfrecords_test_a = tfrecords_valid_a
-    tfrecords_test_b = tfrecords_valid_b
+    #
+    # Unless, we specifically want to test on the actual test set...
+    if not args.test:
+        tfrecords_test_a = tfrecords_valid_a
+        tfrecords_test_b = tfrecords_valid_b
 
     # Calculate class imbalance using labeled training data (i.e. from domain A)
     if args.balance:

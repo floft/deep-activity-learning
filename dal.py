@@ -54,12 +54,13 @@ def update_metrics_on_val(sess,
     # at least the number we wanted to.
     #
     # Evaluate all if max_examples == 0
+    #
+    # Domain A
     while max_examples == 0 or examples < max_examples:
         try:
             # Get next evaluation batch
-            eval_data_a, eval_labels_a, eval_data_b, eval_labels_b = sess.run([
+            eval_data_a, eval_labels_a = sess.run([
                 next_data_batch_test_a, next_labels_batch_test_a,
-                next_data_batch_test_b, next_labels_batch_test_b,
             ])
 
             # Make sure we don't go over the desired number of examples
@@ -72,21 +73,44 @@ def update_metrics_on_val(sess,
                     eval_data_a = eval_data_a[:diff]
                     eval_labels_a = eval_labels_a[:diff]
 
-                if examples + eval_data_b.shape[0] > max_examples:
-                    eval_data_b = eval_data_b[:diff]
-                    eval_labels_b = eval_labels_b[:diff]
-
             examples += eval_data_a.shape[0]
 
             # Match the number of examples we have
             source_domain = domain_labels(0, eval_data_a.shape[0])
-            target_domain = domain_labels(1, eval_data_b.shape[0])
 
             # Log summaries run on the evaluation/validation data
             sess.run(update_metrics_a, feed_dict={
                 x: eval_data_a, y: eval_labels_a, domain: source_domain,
                 keep_prob: 1.0, training: False
             })
+        except tf.errors.OutOfRangeError:
+            break
+
+    # Domain B -- separate since very likely a different size
+    examples = 0
+    while max_examples == 0 or examples < max_examples:
+        try:
+            # Get next evaluation batch
+            eval_data_b, eval_labels_b = sess.run([
+                next_data_batch_test_b, next_labels_batch_test_b,
+            ])
+
+            # Make sure we don't go over the desired number of examples
+            # But, only if we don't want to evaluate all examples (i.e. if
+            # max_examples == 0)
+            if max_examples != 0:
+                diff = max_examples - examples
+
+                if examples + eval_data_b.shape[0] > max_examples:
+                    eval_data_b = eval_data_b[:diff]
+                    eval_labels_b = eval_labels_b[:diff]
+
+            examples += eval_data_b.shape[0]
+
+            # Match the number of examples we have
+            target_domain = domain_labels(1, eval_data_b.shape[0])
+
+            # Log summaries run on the evaluation/validation data
             sess.run(update_metrics_b, feed_dict={
                 x: eval_data_b, y: eval_labels_b, domain: target_domain,
                 keep_prob: 1.0, training: False

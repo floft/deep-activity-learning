@@ -39,7 +39,7 @@ def run_eval(
         class_weights=1.0,
         gpu_memory=0.8,
         max_examples=0): # 0 = all examples
-    # Input training data
+    # Load train dataset
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
             tfrecords_train_a, batch_size, x_dims, num_classes, evaluation=True)
@@ -49,7 +49,7 @@ def run_eval(
             tfrecords_train_b, batch_size, x_dims, num_classes, evaluation=True)
         next_data_batch_b, next_labels_batch_b = input_fn_b()
 
-    # Load all the test data in one batch
+    # Load test dataset
     with tf.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
             tfrecords_test_a, batch_size, x_dims, num_classes, evaluation=True)

@@ -21,33 +21,91 @@ from load_data import _get_tfrecord_input_fn, get_tfrecord_datasets, \
 from dal import last_modified_number, update_metrics_on_val, metric_summaries
 from pool import run_job_pool
 
-def run_eval(
-        ckpt,
-        num_features, num_classes, x_dims,
-        tfrecords_train_a, tfrecords_train_b,
-        tfrecords_test_a, tfrecords_test_b,
-        config,
-        model_func=build_lstm,
-        batch_size=2048,
-        units=100,
-        use_feature_extractor=True,
-        model_dir="models",
-        log_dir="logs",
-        adaptation=True,
-        multi_class=False,
-        bidirectional=False,
-        class_weights=1.0,
-        gpu_memory=0.8,
-        max_examples=0, # 0 = all examples
-        already_built=False):
-    # We have no access to the process itself when running multiple jobs and the
-    # variables are out of scope by the time we get here a second time. Thus,
-    # make them global (per process) and then we can refer to the ones we
-    # previously created (when already_built=True the graph already exists
-    # in this process)
-    global keep_prob, x, domain, y, training, reset_metrics
-    global update_metrics_a, update_metrics_b
-    global source_summs_values, target_summs_values
+def last_modified(dir_name, glob):
+    """
+    Looks in dir_name at all files matching glob and returns the file last
+    modified
+    """
+    files = pathlib.Path(dir_name).glob(glob)
+    files = sorted(files, key=lambda cp:cp.stat().st_mtime)
+
+    if len(files) > 0:
+        return str(files[-1])
+
+    return None
+
+def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation'):
+    # Open the log file generated during training, find the step with the
+    # highest validation accuracy
+    logfile = last_modified(log_dir, "*.tfevents*")
+
+    task_accuracy = []
+    for e in tf.train.summary_iterator(logfile):
+        for v in e.summary.value:
+            if v.tag == tag:
+                task_accuracy.append((e.step, v.simple_value))
+
+    # Sort by accuracy -- but only if we didn't choose to use the last model.
+    # In that case, the ...[-1] will pick the last one, so all we have to do
+    # is not sort this.
+    if not last:
+        task_accuracy.sort(key=lambda tup: tup[1])
+
+    assert len(task_accuracy) > 0, \
+        "task_accuracy empty for log"+logfile+": "+str(task_accuracy)
+
+    max_accuracy = task_accuracy[-1][1]
+    max_accuracy_step = task_accuracy[-1][0]
+
+    return max_accuracy_step, max_accuracy
+
+def get_checkpoint(model_dir, step):
+    """
+    Load corresponding checkpoint -- if it doesn't exist, then it probably
+    saved the iter-1 as a checkpoint. For example, most evaluations are at
+    iterations like 84001 but the checkpoint was at iteration 84000.
+
+    Returns the checkpoint filename and the step we actually loaded (may or
+    may not be the one specified, but should be +/- 1)
+    """
+    ckpt = os.path.join(model_dir, "model.ckpt-"+str(step))
+
+    if not os.path.exists(ckpt+".index"):
+        step -= 1
+        ckpt = os.path.join(model_dir, "model.ckpt-"+str(step))
+
+        assert os.path.exists(ckpt+".index"), \
+            "could not find model checkpoint "+ckpt
+
+    return ckpt, step
+
+def process_model(model_dir, log_dir, model, features, target, fold, al_config,
+        tfrecord_config, gpu_mem, bidirectional, batch_size, units,
+        feature_extractor, adaptation, last,
+        multi_class=False, class_weights=1.0, max_examples=0):
+    num_features = tfrecord_config.num_features
+    num_classes = tfrecord_config.num_classes
+    x_dims = tfrecord_config.x_dims
+
+    tfrecords_train_a, tfrecords_train_b, \
+    tfrecords_valid_a, tfrecords_valid_b, \
+    tfrecords_test_a, tfrecords_test_b = \
+        get_tfrecord_datasets(features, target, fold, False)
+
+    # For training we split the train set into train/valid but now for comparison
+    # with AL (that didn't make that split), we want to re-combine them so the
+    # "train" set accuracies between AL and DAL are on the same data.
+    tfrecords_train_a += tfrecords_valid_a
+    tfrecords_train_b += tfrecords_valid_b
+
+    # Get the step at which we have the highest accuracy on the validation set
+    # Unless, we want the last one, then just get that one.
+    max_accuracy_step, max_accuracy = get_step_from_log(log_dir, last)
+
+    # Get checkpoint file
+    ckpt, max_accuracy_step = get_checkpoint(model_dir, max_accuracy_step)
+
+    print(target+","+str(fold)+","+model+","+str(max_accuracy_step)+","+str(max_accuracy))
 
     # Load train dataset
     with tf.variable_scope("training_data_a"):
@@ -69,112 +127,21 @@ def run_eval(
             tfrecords_test_b, batch_size, x_dims, num_classes, evaluation=True)
         next_data_batch_test_b, next_labels_batch_test_b = eval_input_fn_b()
 
-    if not already_built:
-        # Inputs
-        keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
-        x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-        domain = tf.placeholder(tf.float32, [None, 2], name='domain') # which domain
-        y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
-        training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
-        grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
-
-        # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
-        task_classifier, domain_classifier, _, \
-        _, _, _ = \
-            model_func(x, y, domain, grl_lambda, keep_prob, training,
-                num_classes, num_features, adaptation, units, multi_class,
-                bidirectional, class_weights, x_dims, use_feature_extractor)
-
-        # Summaries - training and evaluation for both domains A and B
-        reset_a, update_metrics_a, _, source_summs_values = metric_summaries(
-            "source", y, task_classifier, domain, domain_classifier,
-            num_classes, multi_class, config)
-
-        reset_b, update_metrics_b, _, target_summs_values = metric_summaries(
-            "target", y, task_classifier, domain, domain_classifier,
-            num_classes, multi_class, config)
-
-        reset_metrics = reset_a + reset_b
-
-    # Keep track of state and summaries
-    saver = tf.train.Saver()
-
-    # Allow running two at once
-    # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
-    config = tf.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = gpu_memory
-
-    # Start training
-    with tf.Session(config=config) as sess:
-        saver.restore(sess, ckpt)
-
-        # Train data
-        sess.run(reset_metrics)
-        update_metrics_on_val(sess,
-            input_hook_a, input_hook_b,
-            next_data_batch_a, next_labels_batch_a,
-            next_data_batch_b, next_labels_batch_b,
-            x, y, domain, keep_prob, training,
-            batch_size, update_metrics_a, update_metrics_b,
-            max_examples)
-
-        s_train, t_train = sess.run([
-            source_summs_values['accuracy_task/source/training'],
-            target_summs_values['accuracy_task/target/training'],
-        ])
-
-        # Test data
-        sess.run(reset_metrics)
-        update_metrics_on_val(sess,
-            eval_input_hook_a, eval_input_hook_b,
-            next_data_batch_test_a, next_labels_batch_test_a,
-            next_data_batch_test_b, next_labels_batch_test_b,
-            x, y, domain, keep_prob, training,
-            batch_size, update_metrics_a, update_metrics_b,
-            max_examples)
-
-        s_test, t_test = sess.run([
-            source_summs_values['accuracy_task/source/validation'],
-            target_summs_values['accuracy_task/target/validation'],
-        ])
-
-    return s_train, t_train, s_test, t_test
-
-def last_modified(dir_name, glob):
-    """
-    Looks in dir_name at all files matching glob and returns the file last
-    modified
-    """
-    files = pathlib.Path(dir_name).glob(glob)
-    files = sorted(files, key=lambda cp:cp.stat().st_mtime)
-
-    if len(files) > 0:
-        return str(files[-1])
-
-    return None
-
-def process_model(model_dir, log_dir, model, features, target, fold, al_config,
-        gpu_mem, bidirectional, batch, units, feature_extractor, adaptation,
-        last):
-    tfrecords_train_a, tfrecords_train_b, \
-    tfrecords_valid_a, tfrecords_valid_b, \
-    tfrecords_test_a, tfrecords_test_b = \
-        get_tfrecord_datasets(features, target, fold, False)
-
-    # For training we split the train set into train/valid but now for comparison
-    # with AL (that didn't make that split), we want to re-combine them so the
-    # "train" set accuracies between AL and DAL are on the same data.
-    tfrecords_train_a += tfrecords_valid_a
-    tfrecords_train_b += tfrecords_valid_b
-
     # Only build graph in this process if we're the first run, i.e. if the graph
     # isn't already built. Alternatively we could reset the graph with
     # tf.reset_default_graph() and then recreate it.
     already_built = len(tf.trainable_variables()) > 0
 
-    if already_built:
-        model_func = None
-    else:
+    # We have no access to the process itself when running multiple jobs and the
+    # variables are out of scope by the time we get here a second time. Thus,
+    # make them global (per process) and then we can refer to the ones we
+    # previously created (when already_built=True the graph already exists
+    # in this process)
+    global sess, keep_prob, x, domain, y, training, reset_metrics
+    global update_metrics_a, update_metrics_b
+    global source_summs_values, target_summs_values
+
+    if not already_built:
         if model == "lstm":
             model_func = build_lstm
         elif model == "vrnn":
@@ -192,60 +159,77 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         else:
             raise NotImplementedError
 
-    # Open the log file generated during training, find the step with the
-    # highest validation accuracy
-    logfile = last_modified(log_dir, "*.tfevents*")
+        # Inputs
+        keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
+        x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
+        domain = tf.placeholder(tf.float32, [None, 2], name='domain') # which domain
+        y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
+        training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
+        grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
 
-    task_accuracy = []
-    for e in tf.train.summary_iterator(logfile):
-        for v in e.summary.value:
-            if v.tag == 'accuracy_task/source/validation':
-                task_accuracy.append((e.step, v.simple_value))
+        # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
+        task_classifier, domain_classifier, _, \
+        _, _, _ = \
+            model_func(x, y, domain, grl_lambda, keep_prob, training,
+                num_classes, num_features, adaptation, units, multi_class,
+                bidirectional, class_weights, x_dims, feature_extractor)
 
-    # Sort by accuracy -- but only if we didn't choose to use the last model.
-    # In that case, the ...[-1] will pick the last one, so all we have to do
-    # is not sort this.
-    if not last:
-        task_accuracy.sort(key=lambda tup: tup[1])
+        # Summaries - training and evaluation for both domains A and B
+        reset_a, update_metrics_a, _, source_summs_values = metric_summaries(
+            "source", y, task_classifier, domain, domain_classifier,
+            num_classes, multi_class, al_config)
 
-    assert len(task_accuracy) > 0, \
-        "task_accuracy empty for log"+logfile+": "+str(task_accuracy)
+        reset_b, update_metrics_b, _, target_summs_values = metric_summaries(
+            "target", y, task_classifier, domain, domain_classifier,
+            num_classes, multi_class, al_config)
 
-    max_accuracy = task_accuracy[-1][1]
-    max_accuracy_step = task_accuracy[-1][0]
+        reset_metrics = reset_a + reset_b
 
-    # Load corresponding checkpoint -- if it doesn't exist, then it probably
-    # saved the iter-1 as a checkpoint. For example, most evaluations are at
-    # iterations like 84001 but the checkpoint was at iteration 84000.
-    ckpt = os.path.join(model_dir, "model.ckpt-"+str(max_accuracy_step))
+        # Allow running multiple at once
+        # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
+        config = tf.ConfigProto()
+        config.gpu_options.per_process_gpu_memory_fraction = gpu_mem
 
-    if not os.path.exists(ckpt+".index"):
-        max_accuracy_step -= 1
-        ckpt = os.path.join(model_dir, "model.ckpt-"+str(max_accuracy_step))
+        # Don't keep recreating the session
+        sess = tf.Session(config=config)
 
-        assert os.path.exists(ckpt+".index"), \
-            "could not find model checkpoint "+ckpt
+    # Load checkpoint
+    saver = tf.train.Saver()
+    saver.restore(sess, ckpt)
 
-    print(target+","+str(fold)+","+model+","+str(max_accuracy_step)+","+str(max_accuracy))
+    # Train data
+    sess.run(reset_metrics)
+    update_metrics_on_val(sess,
+        input_hook_a, input_hook_b,
+        next_data_batch_a, next_labels_batch_a,
+        next_data_batch_b, next_labels_batch_b,
+        x, y, domain, keep_prob, training,
+        batch_size, update_metrics_a, update_metrics_b,
+        max_examples)
 
-    s_train, t_train, s_test, t_test = run_eval(ckpt,
-            tfrecord_config.num_features,
-            tfrecord_config.num_classes,
-            tfrecord_config.x_dims,
-            tfrecords_train_a, tfrecords_train_b,
-            tfrecords_test_a, tfrecords_test_b,
-            al_config,
-            model_func=model_func,
-            model_dir=model_dir,
-            adaptation=adaptation,
-            units=units,
-            use_feature_extractor=feature_extractor,
-            batch_size=batch,
-            multi_class=False,
-            bidirectional=bidirectional,
-            class_weights=1.0,
-            gpu_memory=gpu_mem,
-            already_built=already_built)
+    s_train, t_train = sess.run([
+        source_summs_values['accuracy_task/source/training'],
+        target_summs_values['accuracy_task/target/training'],
+    ])
+
+    # Test data
+    sess.run(reset_metrics)
+    update_metrics_on_val(sess,
+        eval_input_hook_a, eval_input_hook_b,
+        next_data_batch_test_a, next_labels_batch_test_a,
+        next_data_batch_test_b, next_labels_batch_test_b,
+        x, y, domain, keep_prob, training,
+        batch_size, update_metrics_a, update_metrics_b,
+        max_examples)
+
+    s_test, t_test = sess.run([
+        source_summs_values['accuracy_task/source/validation'],
+        target_summs_values['accuracy_task/target/validation'],
+    ])
+
+    # Note: ideally we'd do sess.close() but since we don't know when we're done
+    # with the process (many times calling this per process) we don't know when
+    # to close it.
 
     return target, fold, s_train, t_train, s_test, t_test
 
@@ -313,8 +297,8 @@ if __name__ == '__main__':
         assert last_model is None or last_model == model, \
             "all must use same model but one was "+last_model+" and another "+model
         commands.append((model_dir, log_dir, model, args.features, target, fold,
-            al_config, gpu_mem, args.bidirectional, args.batch, args.units,
-            args.feature_extractor, adaptation, args.last))
+            al_config, tfrecord_config, gpu_mem, args.bidirectional, args.batch,
+            args.units, args.feature_extractor, adaptation, args.last))
 
     print("Target,Fold,Model,Best Step,Accuracy at Step")
     results = run_job_pool(process_model, commands, cores=args.jobs)
@@ -328,7 +312,9 @@ if __name__ == '__main__':
 
     print("Target,Fold,Train A,Test A,Train B,Test B")
     for target, fold, s_train, t_train, s_test, t_test in results:
-        print(target+","+fold+","+s_train+","+s_test+","+t_train+","+t_test)
+        print(target+","+fold+","+ \
+            str(s_train)+","+str(s_test)+","+ \
+            str(t_train)+","+str(t_test))
 
         source_train.append(s_train)
         source_test.append(s_test)

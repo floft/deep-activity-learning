@@ -184,7 +184,6 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
 
     return x
 
-
 def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
         prefetch_buffer_size=1, data_augmentation=False):
@@ -212,7 +211,11 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         return x, y
 
     def input_fn():
-        dataset = tf.data.TFRecordDataset(filenames, compression_type='GZIP')
+        # Interleave the tfrecord files
+        files = tf.data.Dataset.from_tensor_slices(filenames)
+        dataset = files.interleave(
+            lambda x: tf.data.TFRecordDataset(x, compression_type='GZIP').prefetch(100),
+            cycle_length=len(filenames), block_length=1)
 
         if count: # only count, so no need to shuffle
             pass

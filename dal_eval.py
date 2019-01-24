@@ -38,7 +38,17 @@ def run_eval(
         bidirectional=False,
         class_weights=1.0,
         gpu_memory=0.8,
-        max_examples=0): # 0 = all examples
+        max_examples=0, # 0 = all examples
+        already_built=False):
+    # We have no access to the process itself when running multiple jobs and the
+    # variables are out of scope by the time we get here a second time. Thus,
+    # make them global (per process) and then we can refer to the ones we
+    # previously created (when already_built=True the graph already exists
+    # in this process)
+    global keep_prob, x, domain, y, training, reset_metrics
+    global update_metrics_a, update_metrics_b
+    global source_summs_values, target_summs_values
+
     # Load train dataset
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
@@ -59,31 +69,32 @@ def run_eval(
             tfrecords_test_b, batch_size, x_dims, num_classes, evaluation=True)
         next_data_batch_test_b, next_labels_batch_test_b = eval_input_fn_b()
 
-    # Inputs
-    keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
-    x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-    domain = tf.placeholder(tf.float32, [None, 2], name='domain') # which domain
-    y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
-    training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
-    grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
+    if not already_built:
+        # Inputs
+        keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
+        x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
+        domain = tf.placeholder(tf.float32, [None, 2], name='domain') # which domain
+        y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
+        training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
+        grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
 
-    # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
-    task_classifier, domain_classifier, _, \
-    _, _, _ = \
-        model_func(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units, multi_class,
-            bidirectional, class_weights, x_dims, use_feature_extractor)
+        # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
+        task_classifier, domain_classifier, _, \
+        _, _, _ = \
+            model_func(x, y, domain, grl_lambda, keep_prob, training,
+                num_classes, num_features, adaptation, units, multi_class,
+                bidirectional, class_weights, x_dims, use_feature_extractor)
 
-    # Summaries - training and evaluation for both domains A and B
-    reset_a, update_metrics_a, _, source_summs_values = metric_summaries(
-        "source", y, task_classifier, domain, domain_classifier,
-        num_classes, multi_class, config)
+        # Summaries - training and evaluation for both domains A and B
+        reset_a, update_metrics_a, _, source_summs_values = metric_summaries(
+            "source", y, task_classifier, domain, domain_classifier,
+            num_classes, multi_class, config)
 
-    reset_b, update_metrics_b, _, target_summs_values = metric_summaries(
-        "target", y, task_classifier, domain, domain_classifier,
-        num_classes, multi_class, config)
+        reset_b, update_metrics_b, _, target_summs_values = metric_summaries(
+            "target", y, task_classifier, domain, domain_classifier,
+            num_classes, multi_class, config)
 
-    reset_metrics = reset_a + reset_b
+        reset_metrics = reset_a + reset_b
 
     # Keep track of state and summaries
     saver = tf.train.Saver()
@@ -142,15 +153,9 @@ def last_modified(dir_name, glob):
 
     return None
 
-def process_model(model_dir, log_dir, features, target, fold, al_config,
+def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         gpu_mem, bidirectional, batch, units, feature_extractor, adaptation,
         last):
-    print("Processing target", target, "fold", fold, "using model", model)
-
-    # In case a previous run still has the model in memory, reset graph.
-    # This isn't a problem since each process only runs one model at a time.
-    tf.reset_default_graph()
-
     tfrecords_train_a, tfrecords_train_b, \
     tfrecords_valid_a, tfrecords_valid_b, \
     tfrecords_test_a, tfrecords_test_b = \
@@ -162,22 +167,30 @@ def process_model(model_dir, log_dir, features, target, fold, al_config,
     tfrecords_train_a += tfrecords_valid_a
     tfrecords_train_b += tfrecords_valid_b
 
-    if model == "lstm":
-        model_func = build_lstm
-    elif model == "vrnn":
-        model_func = build_vrnn
-    elif model == "cnn":
-        model_func = build_cnn
-    elif model == "resnet":
-        model_func = build_resnet
-    elif model == "attention":
-        model_func = build_attention
-    elif model == "tcn":
-        model_func = build_tcn
-    elif model == "flat":
-        model_func = build_flat
+    # Only build graph in this process if we're the first run, i.e. if the graph
+    # isn't already built. Alternatively we could reset the graph with
+    # tf.reset_default_graph() and then recreate it.
+    already_built = len(tf.trainable_variables()) > 0
+
+    if already_built:
+        model_func = None
     else:
-        raise NotImplementedError
+        if model == "lstm":
+            model_func = build_lstm
+        elif model == "vrnn":
+            model_func = build_vrnn
+        elif model == "cnn":
+            model_func = build_cnn
+        elif model == "resnet":
+            model_func = build_resnet
+        elif model == "attention":
+            model_func = build_attention
+        elif model == "tcn":
+            model_func = build_tcn
+        elif model == "flat":
+            model_func = build_flat
+        else:
+            raise NotImplementedError
 
     # Open the log file generated during training, find the step with the
     # highest validation accuracy
@@ -213,7 +226,7 @@ def process_model(model_dir, log_dir, features, target, fold, al_config,
         assert os.path.exists(ckpt+".index"), \
             "could not find model checkpoint "+ckpt
 
-    print("Loading checkpoint", max_accuracy_step, "with accuracy", max_accuracy)
+    print(target+","+str(fold)+","+model+","+str(max_accuracy_step)+","+str(max_accuracy))
 
     s_train, t_train, s_test, t_test = run_eval(ckpt,
             tfrecord_config.num_features,
@@ -231,7 +244,8 @@ def process_model(model_dir, log_dir, features, target, fold, al_config,
             multi_class=False,
             bidirectional=bidirectional,
             class_weights=1.0,
-            gpu_memory=gpu_mem)
+            gpu_memory=gpu_mem,
+            already_built=already_built)
 
     return target, fold, s_train, t_train, s_test, t_test
 
@@ -243,13 +257,13 @@ if __name__ == '__main__':
         help="Directory for saving log files")
     parser.add_argument('--features', default="simple", type=str,
         help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
-    parser.add_argument('--jobs', default=8, type=int,
-        help="Number of TensorFlow jobs to run at once (default 8)")
+    parser.add_argument('--jobs', default=4, type=int,
+        help="Number of TensorFlow jobs to run at once (default 4)")
     parser.add_argument('--last', dest='last', action='store_true',
         help="Use last model rather than one with best validation set performance")
     parser.add_argument('--units', default=100, type=int,
         help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
-    parser.add_argument('--batch', default=1024, type=int,
+    parser.add_argument('--batch', default=8192, type=int,
         help="Batch size to use (default 1024, decrease if you run out of memory)")
     parser.add_argument('--gpu-mem', default=0.7, type=float,
         help="Percentage of GPU memory to let TensorFlow use (default 0.7, divided among jobs)")
@@ -272,8 +286,6 @@ if __name__ == '__main__':
     files = pathlib.Path(args.logdir).glob("*-*-*")
     models_to_evaluate = []
 
-    print("Models found in", args.logdir)
-
     for log_dir in files:
         items = str(log_dir.stem).split("-")
         assert len(items) == 3 or len(items) == 4, \
@@ -289,20 +301,24 @@ if __name__ == '__main__':
         model_dir = os.path.join(args.modeldir, log_dir.stem)
         assert os.path.exists(model_dir), "Model does not exist "+str(model_dir)
 
-        print("  target", target, "fold", fold, "using model", model)
         models_to_evaluate.append((str(log_dir), model_dir, target, model, fold, adaptation))
 
     gpu_mem = args.gpu_mem / args.jobs
 
     # Run in parallel
     commands = []
+    last_model = None
 
     for log_dir, model_dir, target, model, fold, adaptation in models_to_evaluate:
-        commands.append((model_dir, log_dir, args.features, target, fold, al_config,
-            gpu_mem, args.bidirectional, args.batch, args.units,
+        assert last_model is None or last_model == model, \
+            "all must use same model but one was "+last_model+" and another "+model
+        commands.append((model_dir, log_dir, model, args.features, target, fold,
+            al_config, gpu_mem, args.bidirectional, args.batch, args.units,
             args.feature_extractor, adaptation, args.last))
 
+    print("Target,Fold,Model,Best Step,Accuracy at Step")
     results = run_job_pool(process_model, commands, cores=args.jobs)
+    print()
 
     # Process results
     source_train = []
@@ -310,13 +326,9 @@ if __name__ == '__main__':
     target_train = []
     target_test = []
 
+    print("Target,Fold,Train A,Test A,Train B,Test B")
     for target, fold, s_train, t_train, s_test, t_test in results:
-        print("Target", target, "fold", fold)
-        print(s_train)
-        print(t_train)
-        print(s_test)
-        print(t_test)
-        print()
+        print(target+","+fold+","+s_train+","+s_test+","+t_train+","+t_test)
 
         source_train.append(s_train)
         source_test.append(s_test)
@@ -328,6 +340,15 @@ if __name__ == '__main__':
     target_train = np.array(target_train)
     target_test = np.array(target_test)
 
+    print()
+    print()
+    print("Dataset,Avg,Std")
+    print("Train A,"+str(source_train.mean())+","+str(source_train.std()))
+    print("Test A,"+str(source_test.mean())+","+str(source_test.std()))
+    print("Train B,"+str(target_train.mean())+","+str(target_train.std()))
+    print("Test B,"+str(target_test.mean())+","+str(target_test.std()))
+
+    print()
     print()
     print("Averages over", len(source_train), "runs (each home is 3-fold CV)")
     print("Train A \t Avg:", source_train.mean(), "\t Std:", source_train.std())

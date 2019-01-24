@@ -1,0 +1,52 @@
+#!/bin/bash
+#SBATCH --job-name=DALWINDOWS
+#SBATCH --output=slurm_logs/dalwindows_%j.out
+#SBATCH --error=slurm_logs/dalwindows_%j.err
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=24
+#SBATCH --nodes=1-1
+#SBATCH --gres=gpu:tesla:0
+#SBATCH --partition=taylor,cahnrs_gpu,free_gpu,kamiak,vcea,cahnrs,cahnrs_bigmem
+#SBATCH --time=1-00:00:00
+#SBATCH --mem=220G
+
+#
+# This is a version of dal_results.sh but for running on Kamiak
+#
+
+. kamiak_config.sh
+
+#
+# ---
+#
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+module load cuda/9.0.176 cudnn/7.1.2_cuda9.0 python3/3.5.0
+data="$remotedir"
+
+handle_terminate() {
+    echo "Sigterm or sigint -- exiting"
+    exit 1
+}
+trap 'handle_terminate' SIGTERM SIGINT
+
+# Install dependencies
+echo "Making sure TensorFlow installed: starting"
+pip install --user tensorflow-gpu pillow lxml jupyter matplotlib pandas sklearn scipy tqdm
+echo "Making sure TensorFlow installed: done"
+
+# Evaluate
+echo "Evaluating network: started"
+
+# Generate time windows
+cd "$data/preprocessing/windows"
+python3 generate.py
+
+# Generate .tfrecord files
+cd "$data"
+python3 generate_tfrecord.py
+
+# Compress
+zip simple2_200.zip datasets/simple2_* datasets/simple2.config
+
+echo "Evaluating network: done"

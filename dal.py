@@ -430,7 +430,8 @@ def train(
         gpu_memory=0.8,
         max_examples=0,
         max_plot_examples=100,
-        regularization=False):
+        regularization=False,
+        data_augmentation=False):
 
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
@@ -445,11 +446,13 @@ def train(
     # Input training data
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_train_a, batch_size, x_dims, num_classes)
+            tfrecords_train_a, batch_size, x_dims, num_classes,
+            data_augmentation=data_augmentation)
         next_data_batch_a, next_labels_batch_a = input_fn_a()
     with tf.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_train_b, batch_size, x_dims, num_classes)
+            tfrecords_train_b, batch_size, x_dims, num_classes,
+            data_augmentation=data_augmentation)
         next_data_batch_b, next_labels_batch_b = input_fn_b()
 
     # Load all the test data in one batch
@@ -854,6 +857,8 @@ if __name__ == '__main__':
         help="On high class imbalances weight the loss function (default)")
     parser.add_argument('--no-balance', dest='balance', action='store_false',
         help="Do not weight loss function with high class imbalances")
+    parser.add_argument('--augment', dest='augment', action='store_true',
+        help="Perform data augmentation (for simple2 dataset)")
     parser.add_argument('--sample', dest='sample', action='store_true',
         help="Only use a small amount of data for training/testing")
     parser.add_argument('--test', dest='test', action='store_true',
@@ -987,4 +992,5 @@ if __name__ == '__main__':
             class_weights=class_weights,
             gpu_memory=args.gpu_mem,
             max_examples=args.max_examples,
-            max_plot_examples=args.max_plot_examples)
+            max_plot_examples=args.max_plot_examples,
+            data_augmentation=args.augment)

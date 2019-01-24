@@ -57,6 +57,57 @@ def _get_input_fn(features, labels, batch_size,
         return next_data_batch, next_label_batch
     return input_fn, iter_init_hook
 
+def tf_random_ones(x, mask, start, end):
+    """
+    Set from x[...,start:end] of each selected row (by the mask) to zero and then
+    randomly pick one of them in start:end to set to 1.
+
+    To test:
+        import numpy as np
+        import tensorflow as tf
+        from load_data import tf_random_ones
+        sensor_prob=0.5
+        num_time_features=1
+        num_sensors=2
+        a = np.array([[5,1,2,6],[5,2,3,6],[5,3,4,6],[5,4,5,6],[5,5,6,6],
+                    [5,6,7,6],[5,7,8,6],[5,8,9,6],[5,9,10,6],[5,10,11,6]])
+        x = tf.convert_to_tensor(a, tf.float32)
+        mask = tf.random.uniform([tf.shape(x)[0]]) < sensor_prob
+        x_augmented = tf_random_ones(x, mask, num_time_features, num_time_features+num_sensors)
+
+        sess = tf.Session()
+        sess.run(x_augmented)
+    """
+    num_rows = tf.shape(x)[0]
+    num_values = end - start
+
+    # Zero the sensor values of those rows
+    #
+    # Copy x setting the rows in start:end to zero
+    zeros = tf.zeros([num_rows, num_values], tf.float32)
+    x_zeros = tf.concat([x[:, :start], zeros, x[:, end:]], axis=1)
+    # Above we did it to all rows, so copy only the desired zeroed rows into x
+    x = tf.where(mask, x_zeros, x)
+
+    # Put 1's somewhere back in the sensors (may or may not be the same sensor)
+    #
+    # Get the indices (still using the above mask) of where to set to 1's
+    mask_indices = tf.to_int32(tf.where(mask))
+    # Randomly pick between start:end where to put the 1
+    sensors = tf.random.uniform([tf.shape(mask_indices)[0]],
+        minval=start, maxval=end, dtype=tf.int32)
+    sensors = tf.expand_dims(sensors, axis=1)
+    # To make this an index it needs to be, e.g. [[1,5],[2,6]], if we were
+    # updating rows 1 and 2, where features 5 and 6 would be set to 1's
+    set_to_one = tf.concat([mask_indices,sensors],axis=1)
+    # Set those indices to ones
+    ones = tf.ones([tf.shape(set_to_one)[0]], tf.float32)
+    # Idea from:
+    # https://github.com/tensorflow/tensorflow/issues/2358#issuecomment-274590896
+    x = x + tf.scatter_nd(set_to_one, ones, tf.shape(x))
+
+    return x
+
 def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
         sensor_prob=0.05, value_prob=0.05):
     """
@@ -98,7 +149,9 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
             <0,0,0,1> - close
     """
     assert len(x.shape) == 3, "augmentation data shape: (examples, times, features)"
-    num_examples, num_time_steps, num_features = x.shape
+    num_examples = tf.shape(x)[0]
+    num_time_steps = tf.shape(x)[1]
+    num_features = tf.shape(x)[2]
     num_time_features = 10
     num_values_features = 4
     num_sensors = num_features - num_time_features - num_values_features
@@ -109,8 +162,9 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
     num_rows = num_examples*num_time_steps
 
     # Zero rows
-    rand_rows = np.where(np.random.rand(num_rows)>zero_prob)
-    x[rand_rows] = 0
+    mask = tf.random.uniform([num_rows]) < zero_prob
+    zeros = tf.zeros([num_rows, num_features], tf.float32)
+    x = tf.where(mask, zeros, x)
 
     # Time value noise
     # TODO
@@ -118,20 +172,12 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
     # Switch sensors
     #
     # Randomly select rows
-    rand_rows = np.where(np.random.rand(num_rows)>sensor_prob)
-    # Permute the selected rows randomly but also independently
-    # This is https://stackoverflow.com/a/36273313 combined with
-    # https://www.developerfaqs.com/896/randomly-shuffle-items-in-each-row-of-numpy-array
-    rows = np.tile(rand_rows[0],(2,1)).T # make 2D
-    cols = [np.random.permutation(num_sensors) for _ in range(len(rand_rows[0]))]
-    # Assign back the shuffled sensors
-    x[rand_rows, num_time_features:num_time_features+num_sensors] = x[rows, cols]
+    mask = tf.random.uniform([num_rows]) < sensor_prob
+    x = tf_random_ones(x, mask, num_time_features, num_time_features+num_sensors)
 
-    # Switch sensor value (same as above but for the values part of x)
-    rand_rows = np.where(np.random.rand(num_rows)>value_prob)
-    rows = np.tile(rand_rows[0],(2,1)).T
-    cols = [np.random.permutation(num_values_features) for _ in range(len(rand_rows[0]))]
-    x[rand_rows, num_time_features+num_sensors:] = x[rows, cols]
+    # Switch sensor value
+    mask = tf.random.uniform([num_rows]) < value_prob
+    x = tf_random_ones(x, mask, num_time_features+num_sensors, num_features)
 
     # Return to the original shape
     x = tf.reshape(x, [num_examples, num_time_steps, num_features])
@@ -141,7 +187,7 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
 
 def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
-        prefetch_buffer_size=1, data_augmentation=True):
+        prefetch_buffer_size=1, data_augmentation=False):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 

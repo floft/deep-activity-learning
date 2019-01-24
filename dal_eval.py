@@ -247,10 +247,10 @@ if __name__ == '__main__':
         help="Use last model rather than one with best validation set performance")
     parser.add_argument('--units', default=100, type=int,
         help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
-    parser.add_argument('--batch', default=8192, type=int,
-        help="Batch size to use (default 1024, decrease if you run out of memory)")
-    parser.add_argument('--gpu-mem', default=0.7, type=float,
-        help="Percentage of GPU memory to let TensorFlow use (default 0.7, divided among jobs)")
+    parser.add_argument('--batch', default=16384, type=int,
+        help="Batch size to use (default 16384, decrease if you run out of memory)")
+    parser.add_argument('--gpu-mem', default=0.8, type=float,
+        help="Percentage of GPU memory to let TensorFlow use (default 0.8, divided among jobs)")
     parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
         help="Use a bidirectional RNN (when selected method includes an RNN)")
     parser.add_argument('--feature-extractor', dest='feature_extractor', action='store_true',

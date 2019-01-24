@@ -57,9 +57,91 @@ def _get_input_fn(features, labels, batch_size,
         return next_data_batch, next_label_batch
     return input_fn, iter_init_hook
 
+def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
+        sensor_prob=0.05, value_prob=0.05):
+    """
+    Perform data augmentation for simple2 dataset (see simple2_features.py for
+    the code that generates the features from the raw data)
+
+    Note: this will not work well on AL features
+
+    - Randomly set some rows zero -- This basically deletes the sensor event, but
+      recall that the input "time window" isn't a fixed amount of time but rather
+      a certain number of sensor events. Thus, this effectively (hopefully) makes
+      the network learn to work even if an activity didn't have one sensor
+      trigger, e.g. the person walked in a slightly different place and missed
+      the motion detector.
+    - Add noise to time values -- obviously people don't do things at exactly
+      the same frequency, speed, etc. every time they perform an activity.
+    - Add some probability of switching sensor or sensor value to one of the
+      others (since one-hot encoded)
+
+    Recall the simple2 features are (in this order):
+    - time features
+        - second (/60)
+        - minute (/60)
+        - hour (/12)
+        - hour (/24)
+        - second of day (/86400)
+        - day of week (/7)
+        - day of month (/31)
+        - day of year (/366)
+        - month of year (/12)
+        - year
+    - smart home features
+        - one-hot encoding for which sensor it is, e.g. if three sensors
+          <1,0,0> would be the vector for the first sensor
+        - a vector of what values the sensor gave, in this case on/off/open/close,
+            <1,0,0,0> - on
+            <0,1,0,0> - off
+            <0,0,1,0> - open
+            <0,0,0,1> - close
+    """
+    assert len(x.shape) == 3, "augmentation data shape: (examples, times, features)"
+    num_examples, num_time_steps, num_features = x.shape
+    num_time_features = 10
+    num_values_features = 4
+    num_sensors = num_features - num_time_features - num_values_features
+
+    # Reshape into (examples*time steps, features) so we can process each row
+    # individually
+    x = tf.reshape(x, [num_examples*num_time_steps, num_features])
+    num_rows = num_examples*num_time_steps
+
+    # Zero rows
+    rand_rows = np.where(np.random.rand(num_rows)>zero_prob)
+    x[rand_rows] = 0
+
+    # Time value noise
+    # TODO
+
+    # Switch sensors
+    #
+    # Randomly select rows
+    rand_rows = np.where(np.random.rand(num_rows)>sensor_prob)
+    # Permute the selected rows randomly but also independently
+    # This is https://stackoverflow.com/a/36273313 combined with
+    # https://www.developerfaqs.com/896/randomly-shuffle-items-in-each-row-of-numpy-array
+    rows = np.tile(rand_rows[0],(2,1)).T # make 2D
+    cols = [np.random.permutation(num_sensors) for _ in range(len(rand_rows[0]))]
+    # Assign back the shuffled sensors
+    x[rand_rows, num_time_features:num_time_features+num_sensors] = x[rows, cols]
+
+    # Switch sensor value (same as above but for the values part of x)
+    rand_rows = np.where(np.random.rand(num_rows)>value_prob)
+    rows = np.tile(rand_rows[0],(2,1)).T
+    cols = [np.random.permutation(num_values_features) for _ in range(len(rand_rows[0]))]
+    x[rand_rows, num_time_features+num_sensors:] = x[rows, cols]
+
+    # Return to the original shape
+    x = tf.reshape(x, [num_examples, num_time_steps, num_features])
+
+    return x
+
+
 def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
-        prefetch_buffer_size=1, map_first=False):
+        prefetch_buffer_size=1, data_augmentation=True):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
     iter_init_hook = IteratorInitializerHook()
 
@@ -74,20 +156,17 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         # Parse the input tf.Example proto using the dictionary above.
         # parse_single_example is without a batch, parse_example is with batches
         parsed = tf.parse_example(example_proto, feature_description)
-        return parsed["x"], parsed["y"]
+        x = parsed["x"]
+        y = parsed["y"]
 
-    def _parse_single_function(example_proto):
-        # Parse the input tf.Example proto using the dictionary above.
-        # parse_single_example is without a batch, parse_example is with batches
-        parsed = tf.parse_single_example(example_proto, feature_description)
-        return parsed["x"], parsed["y"]
+        # Perform data augmentation
+        if data_augmentation:
+            x = perform_data_augmentation(x)
+
+        return x, y
 
     def input_fn():
         dataset = tf.data.TFRecordDataset(filenames, compression_type='GZIP')
-
-        # Mapping later is faster since the later version is vectorized
-        if map_first:
-            dataset = dataset.map(_parse_single_function)
 
         if count: # only count, so no need to shuffle
             pass
@@ -97,9 +176,7 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
             dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
 
         dataset = dataset.batch(batch_size)
-
-        if not map_first:
-            dataset = dataset.map(_parse_function)
+        dataset = dataset.map(_parse_function)
 
         # Prefetch for speed up
         # See: https://www.tensorflow.org/guide/performance/datasets
@@ -344,10 +421,8 @@ def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
         gpu_mem=0.8, batch_size=1000000):
     # Since we're using a .tfrecord file, we need to load the data and sum
     # how many instances of each class there are in batches
-    #
-    # map_first=False to speed this up
     input_fn, input_hook = _get_tfrecord_input_fn(
-        filenames, batch_size, x_dims, num_classes, count=True, map_first=False)
+        filenames, batch_size, x_dims, num_classes, count=True)
     _, next_labels_batch = input_fn()
 
     total = 0

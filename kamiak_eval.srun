@@ -3,12 +3,12 @@
 #SBATCH --output=slurm_logs/daleval_%j.out
 #SBATCH --error=slurm_logs/daleval_%j.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=24
 #SBATCH --nodes=1-1
-#SBATCH --gres=gpu:tesla:1
+#SBATCH --gres=gpu:tesla:8
 #SBATCH --partition=taylor,cahnrs_gpu,free_gpu,kamiak,vcea,cahnrs,cahnrs_bigmem
 #SBATCH --time=1-00:00:00
-#SBATCH --mem=40G
+#SBATCH --mem=220G
 
 #
 # This is a version of dal_results.sh but for running on Kamiak
@@ -99,7 +99,7 @@ logs="$data/$from-logs-$suffix"
 out="$data/dal_results_$suffix.txt"
 
 echo "Args: ${program_args[@]}" > "$out"
-./dal_eval.py --gpu-mem=0.9 --modeldir="$models" --logdir="$logs" \
+./dal_eval.py --gpus=8 --gpu-mem=0.9 --modeldir="$models" --logdir="$logs" \
     "${program_args[@]}" | \
     tee -a "$out"
 

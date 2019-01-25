@@ -9,8 +9,10 @@ This takes a model trained by dal.py and evaluates it on both:
 It'll output the {source,target}-{train,test} accuracies for comparison with AL.
 """
 import os
+import sys
 import pathlib
 import argparse
+import multiprocessing
 import numpy as np
 import tensorflow as tf
 
@@ -79,10 +81,47 @@ def get_checkpoint(model_dir, step):
 
     return ckpt, step
 
+def get_gpus():
+    """
+    Get the list of GPU ID's that SLURM is giving us
+    """
+    return [int(x) for x in os.getenv("SLURM_JOB_GPUS", "").split(",")]
+
+def get_pool_id():
+    """
+    Get unique ID for this process in the job pool. It'll range from
+    1 to max_jobs. See: https://stackoverflow.com/a/10192611/2698494
+
+    Will return a number in [0,max_jobs)
+    """
+    current = multiprocessing.current_process()
+    return current._identity[0]-1
+
 def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         tfrecord_config, gpu_mem, bidirectional, batch_size, units,
-        feature_extractor, adaptation, last,
+        feature_extractor, adaptation, last, multi_gpu=False,
         multi_class=False, class_weights=1.0, max_examples=0):
+    # Get what GPU to run this on
+    if multi_gpu:
+        # Get all GPUs SLURM gave to us and what process in the pool this is
+        available_gpus = get_gpus()
+        pool_id = get_pool_id()
+
+        # Pick which one based on pool id
+        gpu = available_gpus[pool_id]
+
+        # Only let TensorFlow see this GPU. I tried tf.device, but somehow
+        # each process still put some stuff into memory on every GPU.
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
+
+        # For debugging
+        print("Using gpu", gpu, file=sys.stderr)
+        sys.stderr.flush()
+    else:
+        # By default (if only using one GPU) the first one
+        gpu = 0
+
+    # Get data
     num_features = tfrecord_config.num_features
     num_classes = tfrecord_config.num_classes
     x_dims = tfrecord_config.x_dims
@@ -185,9 +224,8 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
 
         reset_metrics = reset_a + reset_b
 
-        # Allow running multiple at once
-        # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
         config = tf.ConfigProto()
+        # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
         config.gpu_options.per_process_gpu_memory_fraction = gpu_mem
 
         # Don't keep recreating the session
@@ -243,6 +281,8 @@ if __name__ == '__main__':
         help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
     parser.add_argument('--jobs', default=4, type=int,
         help="Number of TensorFlow jobs to run at once (default 4)")
+    parser.add_argument('--gpus', default=1, type=int,
+        help="Split jobs between GPUs -- overrides jobs (default 1, run multiple jobs on first GPU)")
     parser.add_argument('--last', dest='last', action='store_true',
         help="Use last model rather than one with best validation set performance")
     parser.add_argument('--units', default=100, type=int,
@@ -287,7 +327,19 @@ if __name__ == '__main__':
 
         models_to_evaluate.append((str(log_dir), model_dir, target, model, fold, adaptation))
 
-    gpu_mem = args.gpu_mem / args.jobs
+    # If single GPU, then split memory between jobs. But, if multiple GPUs,
+    # each GPU has its own memory, so don't divide it up.
+    #
+    # If multiple GPUs, the jobs are split by GPU not by the "jobs" argument, so
+    # ignore it and just set jobs to the GPU count.
+    if args.gpus == 1:
+        gpu_mem = args.gpu_mem / args.jobs
+        jobs = args.jobs
+        multi_gpu = False
+    else:
+        gpu_mem = args.gpu_mem
+        jobs = args.gpus
+        multi_gpu = True
 
     # Run in parallel
     commands = []
@@ -298,10 +350,10 @@ if __name__ == '__main__':
             "all must use same model but one was "+last_model+" and another "+model
         commands.append((model_dir, log_dir, model, args.features, target, fold,
             al_config, tfrecord_config, gpu_mem, args.bidirectional, args.batch,
-            args.units, args.feature_extractor, adaptation, args.last))
+            args.units, args.feature_extractor, adaptation, args.last, multi_gpu))
 
     print("Target,Fold,Model,Best Step,Accuracy at Step")
-    results = run_job_pool(process_model, commands, cores=args.jobs)
+    results = run_job_pool(process_model, commands, cores=jobs)
     print()
 
     # Process results

@@ -908,7 +908,7 @@ if __name__ == '__main__':
     if args.balance:
         class_weights = calc_class_weights(tfrecords_train_a,
             tfrecord_config.x_dims, tfrecord_config.num_classes,
-            args.balance_pow, args.gpu_mem)
+            args.balance_pow, args.gpu_mem, args.batch)
     else:
         class_weights = 1.0
 

@@ -467,7 +467,7 @@ def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="dat
         tfrecords_test_a, tfrecords_test_b
 
 def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
-        gpu_mem=0.8, batch_size=1000000):
+        gpu_mem=0.8, batch_size=1024):
     # Since we're using a .tfrecord file, we need to load the data and sum
     # how many instances of each class there are in batches
     input_fn, input_hook = _get_tfrecord_input_fn(

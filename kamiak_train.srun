@@ -10,6 +10,8 @@
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=20G
 
+# Note: if changing time above, also change on scratch dir command
+
 #
 # This script runs three networks at the same time on the same GPU -- folds 0-2.
 # You must specify what target you want e.g. --target=hh101 as an argument.
@@ -85,7 +87,7 @@ handle_error() {
 }
 
 handle_terminate() {
-    echo "Sigterm or sigint -- exiting"
+    echo "Exiting"
     thread_kill "${thread_list[@]}"
     cleanup
     exit 1
@@ -97,8 +99,8 @@ cleanup() {
 }
 
 # Create a scratch workspace
-SCRATCHDIR="$(mkworkspace -q -t 7-00:00 -b /local)" # 7 days
-trap 'handle_terminate' SIGTERM SIGINT
+SCRATCHDIR="$(mkworkspace -q -t 1-00:00:00 -b /local)"
+trap 'handle_terminate' EXIT SIGTERM SIGINT
 
 echo "Scratch space: $SCRATCHDIR"
 echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"

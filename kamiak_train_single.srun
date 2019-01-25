@@ -1,17 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=DALEVAL
-#SBATCH --output=slurm_logs/daleval_%j.out
-#SBATCH --error=slurm_logs/daleval_%j.err
+#SBATCH --job-name=DAL
+#SBATCH --output=slurm_logs/dal_%j.out
+#SBATCH --error=slurm_logs/dal_%j.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
+#SBATCH --cpus-per-task=3
 #SBATCH --nodes=1-1
 #SBATCH --gres=gpu:tesla:1
 #SBATCH --partition=taylor,cahnrs_gpu,free_gpu,kamiak,vcea,cahnrs,cahnrs_bigmem
 #SBATCH --time=1-00:00:00
-#SBATCH --mem=40G
+#SBATCH --mem=20G
+
+# Note: if changing time above, also change on scratch dir command
 
 #
-# This is a version of dal_results.sh but for running on Kamiak
+# This script runs one network. You must specify what target you want e.g.
+# --target=hh101 as an argument. Also, specify the fold.
 #
 
 . kamiak_config.sh
@@ -20,14 +23,13 @@
 # ---
 #
 
-suffix="$1"
-if [[ -z $suffix ]]; then
-    echo "Usage: sbatch kamiak_eval.srun flat --dataset=al.zip --features=al"
+first_arg=$1
+if [[ -z $first_arg ]]; then
+    echo "Specify what method to use, e.g. --flat"
     exit 1
 else
     echo "Args: $@"
 fi
-shift
 
 # Allow overriding the dataset zip file with --dataset=... etc.
 # Other args are passed directly to the Python program.
@@ -39,6 +41,12 @@ for i; do
     if [[ "$name" == "--dataset" ]]; then
         compressedDataset="$value"
         echo "Overriding dataset to be: $compressedDataset"
+    elif [[ "$name" == "--logdir" ]]; then
+        logFolder="$value"
+        echo "Overriding logdir to be: $logFolder"
+    elif [[ "$name" == "--modeldir" ]]; then
+        modelFolder="$value"
+        echo "Overriding modeldir to be: $modelFolder"
     else
         program_args+=("$i")
     fi
@@ -51,7 +59,7 @@ module load cuda/9.0.176 cudnn/7.1.2_cuda9.0 python3/3.5.0
 data="$remotedir"
 
 handle_terminate() {
-    echo "Sigterm or sigint -- exiting"
+    echo "Exiting"
     cleanup
     exit 1
 }
@@ -62,8 +70,8 @@ cleanup() {
 }
 
 # Create a scratch workspace
-SCRATCHDIR="$(mkworkspace -q -t 7-00:00 -b /local)" # 7 days
-trap 'handle_terminate' SIGTERM SIGINT
+SCRATCHDIR="$(mkworkspace -q -t 1-00:00:00 -b /local)"
+trap 'handle_terminate' EXIT SIGTERM SIGINT
 
 echo "Scratch space: $SCRATCHDIR"
 echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"
@@ -78,8 +86,9 @@ cd "$SCRATCHDIR"
 echo " - program"
 cp -a "$data"/*.py .
 echo " - dataset"
-cp -a "$data/$compressedDataset" .
-unzip "$compressedDataset"
+# TODO
+#cp -a "$data/$compressedDataset" .
+#unzip "$compressedDataset"
 echo " - config file"
 mkdir -p preprocessing/al-features/
 cp -a "$data/preprocessing/al-features/al.config" preprocessing/al-features/
@@ -87,23 +96,23 @@ echo "Getting data: done"
 
 # Install dependencies
 echo "Making sure TensorFlow installed: starting"
-pip install --user tensorflow-gpu pillow lxml jupyter matplotlib pandas sklearn scipy tqdm
+# I upgraded tensorflow with:
+#   module load python3/3.5.0
+#   pip install --user --upgrade --no-cache-dir tensorflow-gpu
+pip install --user tensorflow-gpu pillow lxml jupyter matplotlib pandas sklearn scipy
 echo "Making sure TensorFlow installed: done"
 
-# Evaluate
-echo "Evaluating network: started"
+# Train
+echo "Training network: started"
+mkdir -p "$data/$logFolder/" # log dir, rsync this to view with TensorBoard
 
-from="kamiak"
-models="$data/$from-models-$suffix"
-logs="$data/$from-logs-$suffix"
-out="$data/dal_results_$suffix.txt"
+# TODO keeps on dying, so don't copy data, just use it in $data folder
+cd "$data"
+python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
+    --gpu-mem=0.9 "${program_args[@]}"
 
-echo "Args: ${program_args[@]}" > "$out"
-./dal_eval.py --gpu-mem=0.9 --modeldir="$models" --logdir="$logs" \
-    "${program_args[@]}" | \
-    tee -a "$out"
-
-echo "Evaluating network: done"
+wait
+echo "Training network: done"
 
 # Cleanup
 echo "Deleting workspace: started"

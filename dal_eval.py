@@ -9,7 +9,6 @@ This takes a model trained by dal.py and evaluates it on both:
 It'll output the {source,target}-{train,test} accuracies for comparison with AL.
 """
 import os
-import sys
 import pathlib
 import argparse
 import multiprocessing
@@ -113,10 +112,6 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         # Only let TensorFlow see this GPU. I tried tf.device, but somehow
         # each process still put some stuff into memory on every GPU.
         os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
-
-        # For debugging
-        print("Using gpu", gpu, file=sys.stderr)
-        sys.stderr.flush()
     else:
         # By default (if only using one GPU) the first one
         gpu = 0

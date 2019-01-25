@@ -100,7 +100,7 @@ cleanup() {
 
 # Create a scratch workspace
 SCRATCHDIR="$(mkworkspace -q -t 1-00:00:00 -b /local)"
-trap 'handle_terminate' EXIT SIGTERM SIGINT
+trap 'handle_terminate' SIGTERM SIGINT
 
 echo "Scratch space: $SCRATCHDIR"
 echo "SLURM_CPUS_PER_TASK: $SLURM_CPUS_PER_TASK"

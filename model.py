@@ -127,19 +127,37 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_layers = 0
 
         if use_feature_extractor:
-            num_layers = 2
+            num_layers = 5
 
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):
-                feature_extractor = tf.contrib.layers.fully_connected(
-                    feature_extractor, 50, activation_fn=None)
+                n = feature_extractor
 
+                n = tf.contrib.layers.fully_connected(
+                    n, 50, activation_fn=None)
                 if batch_norm:
-                    feature_extractor = tf.layers.batch_normalization(
-                        feature_extractor, training=training)
+                    n = tf.layers.batch_normalization(
+                        n, training=training)
+                n = tf.nn.relu(n)
+                n = tf.nn.dropout(n, keep_prob)
 
-                feature_extractor = tf.nn.relu(feature_extractor)
-                feature_extractor = tf.nn.dropout(feature_extractor, keep_prob)
+                n = tf.contrib.layers.fully_connected(
+                    n, 50, activation_fn=None)
+                if batch_norm:
+                    n = tf.layers.batch_normalization(
+                        n, training=training)
+                n = tf.nn.relu(n)
+                n = tf.nn.dropout(n, keep_prob)
+
+                # Make this kind of like residual networks, where the new layer
+                # learns the change from the previous value, i.e. we do previous
+                # layer output plus the new layer's output. Assuming they have
+                # the same dimension, which is the case for all but the first
+                # layer
+                if i == 0:
+                    feature_extractor = n
+                else:
+                    feature_extractor = feature_extractor + n
 
     # Pass last output to fully connected then softmax to get class prediction
     with tf.variable_scope("task_classifier"):

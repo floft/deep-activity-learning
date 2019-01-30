@@ -96,6 +96,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
 
 def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_classes, adaptation=True, multi_class=False, class_weights=1.0,
+        units=50, layers=5,
         batch_norm=True, two_domain_classifiers=False, log_outputs=True,
         use_grl=True, use_feature_extractor=True):
     """
@@ -127,14 +128,14 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_layers = 0
 
         if use_feature_extractor:
-            num_layers = 5
+            num_layers = layers
 
         for i in range(num_layers):
             with tf.variable_scope("layer_"+str(i)):
                 n = feature_extractor
 
                 n = tf.contrib.layers.fully_connected(
-                    n, 50, activation_fn=None)
+                    n, units, activation_fn=None)
                 if batch_norm:
                     n = tf.layers.batch_normalization(
                         n, training=training)
@@ -142,7 +143,7 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
                 n = tf.nn.dropout(n, keep_prob)
 
                 n = tf.contrib.layers.fully_connected(
-                    n, 50, activation_fn=None)
+                    n, units, activation_fn=None)
                 if batch_norm:
                     n = tf.layers.batch_normalization(
                         n, training=training)
@@ -294,7 +295,7 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         feature_extractor, summaries
 
 def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ TCN as an alternative to using RNNs """
@@ -312,7 +313,7 @@ def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             tcn_output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Total loss is the sum
@@ -329,7 +330,7 @@ def build_tcn(x, y, domain, grl_lambda, keep_prob, training,
         feature_extractor, summaries, extra_outputs
 
 def build_flat(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ Flatten the input and pass directly to the feature extractor
@@ -351,7 +352,7 @@ def build_flat(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Total loss is the sum
@@ -367,7 +368,7 @@ def build_flat(x, y, domain, grl_lambda, keep_prob, training,
         feature_extractor, summaries, extra_outputs
 
 def build_lstm(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True):
     """ LSTM for a baseline """
@@ -384,7 +385,7 @@ def build_lstm(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             rnn_output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Total loss is the sum
@@ -401,7 +402,7 @@ def build_lstm(x, y, domain, grl_lambda, keep_prob, training,
         feature_extractor, summaries, extra_outputs
 
 def build_vrnn(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True, eps=1e-9, use_z=True,
             log_outputs=False, log_weights=False):
@@ -435,7 +436,7 @@ def build_vrnn(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             rnn_output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Loss
@@ -536,7 +537,7 @@ def cnn(x, keep_prob, training, batch_norm=True):
     return n
 
 def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ CNN but 1-dimensional along the width since not really any relation
@@ -553,7 +554,7 @@ def build_cnn(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             cnn_output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Total loss is the sum
@@ -621,7 +622,7 @@ def resnet(x, keep_prob, training, batch_norm=True):
     return n
 
 def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True, initial_batch_norm=True):
     """ CNN for image data rather than time-series data """
@@ -635,7 +636,7 @@ def build_resnet(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Total loss is the sum
@@ -728,7 +729,7 @@ def attention(x, keep_prob, training, num_features, initial_batch_norm=True, bat
     return n
 
 def build_attention(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units,
+            num_classes, num_features, adaptation, units, layers,
             multi_class=False, bidirectional=False, class_weights=1.0,
             x_dims=None, use_feature_extractor=True):
     """ Attention is all you need -- for AL features """
@@ -748,7 +749,7 @@ def build_attention(x, y, domain, grl_lambda, keep_prob, training,
     task_output, domain_softmax, task_loss, domain_loss, \
         feature_extractor, summaries = build_model(
             output, y, domain, grl_lambda, keep_prob, training,
-            num_classes, adaptation, multi_class, class_weights,
+            num_classes, adaptation, multi_class, class_weights, units, layers,
             use_feature_extractor=use_feature_extractor)
 
     # Total loss is the sum

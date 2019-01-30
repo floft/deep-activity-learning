@@ -97,7 +97,7 @@ def get_pool_id():
     return current._identity[0]-1
 
 def process_model(model_dir, log_dir, model, features, target, fold, al_config,
-        tfrecord_config, gpu_mem, bidirectional, batch_size, units,
+        tfrecord_config, gpu_mem, bidirectional, batch_size, units, layers,
         feature_extractor, adaptation, last, multi_gpu=False,
         multi_class=False, class_weights=1.0, max_examples=0):
     # Get what GPU to run this on
@@ -205,7 +205,7 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         task_classifier, domain_classifier, _, \
         _, _, _ = \
             model_func(x, y, domain, grl_lambda, keep_prob, training,
-                num_classes, num_features, adaptation, units, multi_class,
+                num_classes, num_features, adaptation, units, layers, multi_class,
                 bidirectional, class_weights, x_dims, feature_extractor)
 
         # Summaries - training and evaluation for both domains A and B
@@ -280,8 +280,10 @@ if __name__ == '__main__':
         help="Split jobs between GPUs -- overrides jobs (default 1, run multiple jobs on first GPU)")
     parser.add_argument('--last', dest='last', action='store_true',
         help="Use last model rather than one with best validation set performance")
-    parser.add_argument('--units', default=100, type=int,
-        help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
+    parser.add_argument('--units', default=50, type=int,
+        help="Number of LSTM hidden units and VRNN latent variable size (default 50)")
+    parser.add_argument('--layers', default=5, type=int,
+        help="Number of layers for the feature extractor (default 5)")
     parser.add_argument('--batch', default=16384, type=int,
         help="Batch size to use (default 16384, decrease if you run out of memory)")
     parser.add_argument('--gpu-mem', default=0.8, type=float,
@@ -345,7 +347,8 @@ if __name__ == '__main__':
             "all must use same model but one was "+last_model+" and another "+model
         commands.append((model_dir, log_dir, model, args.features, target, fold,
             al_config, tfrecord_config, gpu_mem, args.bidirectional, args.batch,
-            args.units, args.feature_extractor, adaptation, args.last, multi_gpu))
+            args.units, args.layers, args.feature_extractor, adaptation,
+            args.last, multi_gpu))
 
     print("Target,Fold,Model,Best Step,Accuracy at Step")
     results = run_job_pool(process_model, commands, cores=jobs)

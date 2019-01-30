@@ -414,6 +414,7 @@ def train(
         lr_multiplier=1,
         dropout_keep_prob=0.8,
         units=100,
+        layers=5,
         use_feature_extractor=True,
         model_dir="models",
         log_dir="logs",
@@ -484,7 +485,7 @@ def train(
     task_classifier, domain_classifier, total_loss, \
     feature_extractor, model_summaries, extra_model_outputs = \
         model_func(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units, multi_class,
+            num_classes, num_features, adaptation, units, layers, multi_class,
             bidirectional, class_weights, x_dims, use_feature_extractor)
 
     # Get variables of model - needed if we train in two steps
@@ -827,18 +828,20 @@ if __name__ == '__main__':
         help="What dataset to use as the target (default \"hh101\")")
     parser.add_argument('--features', default="simple", type=str,
         help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
-    parser.add_argument('--units', default=100, type=int,
-        help="Number of LSTM hidden units and VRNN latent variable size (default 100)")
+    parser.add_argument('--units', default=50, type=int,
+        help="Number of LSTM hidden units and VRNN latent variable size (default 50)")
+    parser.add_argument('--layers', default=5, type=int,
+        help="Number of layers for the feature extractor (default 5)")
     parser.add_argument('--steps', default=100000, type=int,
         help="Number of training steps to run (default 100000)")
     parser.add_argument('--batch', default=1024, type=int,
         help="Batch size to use (default 1024, decrease if you run out of memory)")
     parser.add_argument('--lr', default=0.0001, type=float,
-        help="Learning rate for training (default 0.0003)")
+        help="Learning rate for training (default 0.0001)")
     parser.add_argument('--lr-mult', default=1.0, type=float,
         help="Multiplier for extra discriminator training learning rate (default 1.0)")
-    parser.add_argument('--dropout', default=0.8, type=float,
-        help="Keep probability for dropout (default 0.8)")
+    parser.add_argument('--dropout', default=0.95, type=float,
+        help="Keep probability for dropout (default 0.95)")
     parser.add_argument('--gpu-mem', default=0.4, type=float,
         help="Percentage of GPU memory to let TensorFlow use (default 0.4, max ~0.8)")
     parser.add_argument('--model-steps', default=4000, type=int,
@@ -980,6 +983,7 @@ if __name__ == '__main__':
             learning_rate=args.lr,
             lr_multiplier=args.lr_mult,
             units=args.units,
+            layers=args.layers,
             use_feature_extractor=args.feature_extractor,
             batch_size=args.batch,
             dropout_keep_prob=args.dropout,

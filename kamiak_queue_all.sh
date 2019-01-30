@@ -23,6 +23,6 @@ shift
 
 for target in "${datasets[@]}"; do
     echo "Queueing $target"
-    sbatch kamiak_train.srun --target="$target" \
+    sbatch -J "$suffix" kamiak_train.srun --target="$target" \
         --logdir="$logFolder" --modeldir="$modelFolder" "$@"
 done

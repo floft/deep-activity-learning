@@ -97,7 +97,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
 def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_classes, adaptation=True, multi_class=False, class_weights=1.0,
         units=50, layers=5,
-        batch_norm=True, two_domain_classifiers=False, log_outputs=True,
+        batch_norm=True, log_outputs=True,
         use_grl=True, use_feature_extractor=True):
     """
     Creates the feature extractor, task classifier, domain classifier
@@ -112,7 +112,6 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         adaptation -- boolean whether we wish to perform adaptation or not
         multi_class -- boolean whether to use sigmoid (for multi-class) or softmax
         batch_norm -- boolean whether to use BatchNorm
-        two_domain_classifiers -- an experiment, not recommended to use
         log_outputs -- boolean whether we want to log outputs to for TensorBoard
         class_weights -- weights for handling large class imbalances (probably
             pass in [class0_weight, class1_weight, ... classN_weight])
@@ -176,18 +175,6 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
 
         domain_classifier, domain_softmax, _ = classifier(
             gradient_reversal_layer, 2, keep_prob, training, batch_norm)
-
-    # Maybe try one before the feature extractor too
-    if two_domain_classifiers:
-        with tf.variable_scope("domain_classifier2"):
-            # Optionally bypass using a GRL
-            if use_grl:
-                gradient_reversal_layer2 = flip_gradient(x, grl_lambda)
-            else:
-                gradient_reversal_layer2 = x
-
-            domain_classifier2, _, _ = classifier(
-                gradient_reversal_layer2, 2, keep_prob, training, batch_norm)
 
     # If doing domain adaptation, then we'll need to ignore the second half of the
     # batch for task classification during training since we don't know the labels
@@ -261,10 +248,6 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
 
     with tf.variable_scope("domain_loss"):
         domain_loss = tf.losses.softmax_cross_entropy(domain, domain_classifier)
-
-        if two_domain_classifiers:
-            domain_loss += tf.losses.softmax_cross_entropy(
-                domain, domain_classifier2)
 
     # If multi-class the task output will be sigmoid rather than softmax
     if multi_class:

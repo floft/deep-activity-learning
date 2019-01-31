@@ -54,7 +54,7 @@ def build_rnn(x, keep_prob, create_cell, dropout=True, bidirectional=False):
 
     return outputs, cells, final_state
 
-def classifier(x, num_classes, keep_prob, training, batch_norm):
+def classifier(x, num_classes, keep_prob, training, batch_norm, units=50, num_layers=1):
     """
     We'll use the same clasifier for task or domain classification
 
@@ -67,7 +67,6 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
     Also returns sigmoid output for if doing multi-class classification.
     """
     classifier_output = x
-    num_layers = 1
 
     for i in range(num_layers):
         with tf.variable_scope("layer_"+str(i)):
@@ -75,7 +74,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm):
             if i == num_layers-1:
                 num_features = num_classes
             else:
-                num_features = 50
+                num_features = units
 
             classifier_output = tf.contrib.layers.fully_connected(
                     classifier_output, num_features, activation_fn=None)
@@ -162,7 +161,8 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
     # Pass last output to fully connected then softmax to get class prediction
     with tf.variable_scope("task_classifier"):
         task_classifier, task_softmax, task_sigmoid = classifier(
-            feature_extractor, num_classes, keep_prob, training, batch_norm)
+            feature_extractor, num_classes, keep_prob, training, batch_norm,
+            units, num_layers=1)
 
     # Also pass output to domain classifier
     # Note: always have 2 domains, so set outputs to 2
@@ -178,10 +178,11 @@ def build_model(x, y, domain, grl_lambda, keep_prob, training,
         # the task classifier.
         if generalization:
             gradient_reversal_layer = tf.concat([
-                tf.stop_gradient(task_classifier), gradient_reversal_layer], axis=1)
+                tf.stop_gradient(task_softmax), gradient_reversal_layer], axis=1)
 
         domain_classifier, domain_softmax, _ = classifier(
-            gradient_reversal_layer, num_domains, keep_prob, training, batch_norm)
+            gradient_reversal_layer, num_domains, keep_prob, training, batch_norm,
+            units, num_layers=2)
 
     # If doing domain adaptation, then we'll need to ignore the second half of the
     # batch for task classification during training since we don't know the labels

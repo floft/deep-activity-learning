@@ -31,7 +31,8 @@ def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
     next_data_batch_test_a, next_labels_batch_test_a,
     next_data_batch_test_b, next_labels_batch_test_b,
-    x, y, domain, keep_prob, training,
+    next_domains_batch_test_a, next_domains_batch_test_b,
+    x, y, domain, keep_prob, training, num_domains, generalization,
     batch_size, update_metrics_a, update_metrics_b,
     max_examples):
     """
@@ -59,8 +60,9 @@ def update_metrics_on_val(sess,
     while max_examples == 0 or examples < max_examples:
         try:
             # Get next evaluation batch
-            eval_data_a, eval_labels_a = sess.run([
+            eval_data_a, eval_labels_a, eval_domains_a = sess.run([
                 next_data_batch_test_a, next_labels_batch_test_a,
+                next_domains_batch_test_a,
             ])
 
             # Make sure we don't go over the desired number of examples
@@ -75,8 +77,11 @@ def update_metrics_on_val(sess,
 
             examples += eval_data_a.shape[0]
 
-            # Match the number of examples we have
-            source_domain = domain_labels(0, eval_data_a.shape[0])
+            if generalization:
+                source_domain = eval_domains_a
+            else:
+                # Match the number of examples we have
+                source_domain = domain_labels(0, eval_data_a.shape[0], num_domains)
 
             # Log summaries run on the evaluation/validation data
             sess.run(update_metrics_a, feed_dict={
@@ -91,8 +96,9 @@ def update_metrics_on_val(sess,
     while max_examples == 0 or examples < max_examples:
         try:
             # Get next evaluation batch
-            eval_data_b, eval_labels_b = sess.run([
+            eval_data_b, eval_labels_b, eval_domains_b = sess.run([
                 next_data_batch_test_b, next_labels_batch_test_b,
+                next_domains_batch_test_b,
             ])
 
             # Make sure we don't go over the desired number of examples
@@ -107,8 +113,11 @@ def update_metrics_on_val(sess,
 
             examples += eval_data_b.shape[0]
 
-            # Match the number of examples we have
-            target_domain = domain_labels(1, eval_data_b.shape[0])
+            if generalization:
+                target_domain = eval_domains_b
+            else:
+                # Match the number of examples we have
+                target_domain = domain_labels(1, eval_data_b.shape[0], num_domains)
 
             # Log summaries run on the evaluation/validation data
             sess.run(update_metrics_b, feed_dict={
@@ -263,6 +272,7 @@ def metric_summaries(domain,
 
     with tf.variable_scope("metrics_%s" % domain):
         # Depending on if multi-class, what we consider a positive class is different
+        # TODO this actually is probably actually wrong for multi-class
         if multi_class:
             # If multi-class, then each output is a sigmoid independent of the others,
             # so for each class check >0.5 for predicting a "yes" for that class.
@@ -403,7 +413,7 @@ def opt_with_summ(optimizer, loss, var_list=None):
     return update_step, summaries
 
 def train(
-        num_features, num_classes, x_dims,
+        num_features, num_classes, num_domains, x_dims,
         tfrecords_train_a, tfrecords_train_b,
         tfrecords_test_a, tfrecords_test_b,
         config,
@@ -423,6 +433,7 @@ def train(
         log_validation_accuracy_steps=2000,
         log_extra_save_steps=2000,
         adaptation=True,
+        generalization=False,
         multi_class=False,
         bidirectional=False,
         class_weights=1.0,
@@ -447,37 +458,46 @@ def train(
     # Input training data
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_train_a, batch_size, x_dims, num_classes,
+            tfrecords_train_a, batch_size, x_dims, num_classes, num_domains,
             data_augmentation=data_augmentation)
-        next_data_batch_a, next_labels_batch_a = input_fn_a()
+        next_data_batch_a, next_labels_batch_a, next_domains_batch_a = input_fn_a()
     with tf.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_train_b, batch_size, x_dims, num_classes,
+            tfrecords_train_b, batch_size, x_dims, num_classes, num_domains,
             data_augmentation=data_augmentation)
-        next_data_batch_b, next_labels_batch_b = input_fn_b()
+        next_data_batch_b, next_labels_batch_b, next_domains_batch_b = input_fn_b()
 
     # Load all the test data in one batch
     with tf.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_test_a, batch_size, x_dims, num_classes, evaluation=True)
-        next_data_batch_test_a, next_labels_batch_test_a = eval_input_fn_a()
+            tfrecords_test_a, batch_size, x_dims, num_classes, num_domains,
+            evaluation=True)
+        next_data_batch_test_a, next_labels_batch_test_a, \
+            next_domains_batch_test_a = eval_input_fn_a()
     with tf.variable_scope("evaluation_data_b"):
         eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_test_b, batch_size, x_dims, num_classes, evaluation=True)
-        next_data_batch_test_b, next_labels_batch_test_b = eval_input_fn_b()
+            tfrecords_test_b, batch_size, x_dims, num_classes, num_domains,
+            evaluation=True)
+        next_data_batch_test_b, next_labels_batch_test_b, \
+            next_domains_batch_test_b = eval_input_fn_b()
+
+    # Above we needed to load with the right number of num_domains, but for
+    # adaptation, we only want two: source and target
+    if adaptation:
+        num_domains = 2
 
     # Inputs
     keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
     x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-    domain = tf.placeholder(tf.float32, [None, 2], name='domain') # which domain
+    domain = tf.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
     y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
     training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
     grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
     lr = tf.placeholder(tf.float32, (), name='learning_rate')
 
     # Source domain will be [[1,0], [1,0], ...] and target domain [[0,1], [0,1], ...]
-    source_domain = domain_labels(0, batch_size)
-    target_domain = domain_labels(1, batch_size)
+    source_domain = domain_labels(0, batch_size, num_domains)
+    target_domain = domain_labels(1, batch_size, num_domains)
 
     # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
     #
@@ -485,8 +505,8 @@ def train(
     task_classifier, domain_classifier, total_loss, \
     feature_extractor, model_summaries, extra_model_outputs = \
         model_func(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_features, adaptation, units, layers, multi_class,
-            bidirectional, class_weights, x_dims, use_feature_extractor)
+            num_classes, num_domains, num_features, adaptation, generalization, units, layers,
+            multi_class, bidirectional, class_weights, x_dims, use_feature_extractor)
 
     # Get variables of model - needed if we train in two steps
     variables = tf.trainable_variables()
@@ -527,7 +547,7 @@ def train(
         train_notdomain = optimizer.minimize(total_loss,
             var_list=model_vars+feature_extractor_vars+task_classifier_vars)
 
-        if adaptation:
+        if adaptation or generalization:
             train_domain = optimizer.minimize(total_loss,
                 var_list=domain_classifier_vars)
 
@@ -599,9 +619,10 @@ def train(
             step = sess.run(inc_global_step)
 
             # Get data for this iteration
-            data_batch_a, labels_batch_a, data_batch_b, labels_batch_b = sess.run([
-                next_data_batch_a, next_labels_batch_a,
-                next_data_batch_b, next_labels_batch_b,
+            data_batch_a, labels_batch_a, domains_batch_a, \
+            data_batch_b, labels_batch_b, domains_batch_b = sess.run([
+                next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
+                next_data_batch_b, next_labels_batch_b, next_domains_batch_b,
             ])
 
             if adaptation:
@@ -653,6 +674,18 @@ def train(
                 #         x: combined_x, y: combined_labels, domain: combined_domain_flip,
                 #         keep_prob: dropout_keep_prob, lr: lr_value, training: True
                 #     })
+            elif generalization:
+                sess.run(train_all, feed_dict={
+                    x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
+                    grl_lambda: grl_lambda_value,
+                    keep_prob: dropout_keep_prob, lr: lr_value, training: True
+                })
+
+                sess.run(train_domain, feed_dict={
+                    x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
+                    grl_lambda: 0.0,
+                    keep_prob: dropout_keep_prob, lr: lr_multiplier*lr_value, training: True
+                })
             else:
                 # Train task classifier on source domain to be correct
                 sess.run(train_notdomain, feed_dict={
@@ -671,11 +704,18 @@ def train(
 
                 t = time.time()
 
+                if generalization:
+                    domains_a = domains_batch_a
+                    domains_b = domains_batch_b
+                else:
+                    domains_a = source_domain
+                    domains_b = target_domain
+
                 # Log summaries run on the training data
                 #
                 # Reset metrics, update metrics, then generate summaries
                 feed_dict = {
-                    x: data_batch_a, y: labels_batch_a, domain: source_domain,
+                    x: data_batch_a, y: labels_batch_a, domain: domains_a,
                     keep_prob: 1.0, training: False
                 }
                 sess.run(reset_metrics)
@@ -684,7 +724,7 @@ def train(
                 writer.add_summary(summ, step)
 
                 feed_dict = {
-                    x: data_batch_b, y: labels_batch_b, domain: target_domain,
+                    x: data_batch_b, y: labels_batch_b, domain: domains_b,
                     keep_prob: 1.0, training: False
                 }
                 sess.run(update_metrics_b, feed_dict=feed_dict)
@@ -709,7 +749,8 @@ def train(
                     eval_input_hook_a, eval_input_hook_b,
                     next_data_batch_test_a, next_labels_batch_test_a,
                     next_data_batch_test_b, next_labels_batch_test_b,
-                    x, y, domain, keep_prob, training,
+                    next_domains_batch_test_a, next_domains_batch_test_b,
+                    x, y, domain, keep_prob, training, num_domains, generalization,
                     batch_size, update_metrics_a, update_metrics_b,
                     max_examples)
 
@@ -732,9 +773,14 @@ def train(
             if i%log_extra_save_steps == 0:
                 t = time.time()
 
+                if generalization:
+                    domains_a = domains_batch_a
+                else:
+                    domains_a = source_domain
+
                 # Training weights
                 summ = sess.run(training_summaries_extra_a, feed_dict={
-                    x: data_batch_a, y: labels_batch_a, domain: source_domain,
+                    x: data_batch_a, y: labels_batch_a, domain: domains_a,
                     keep_prob: 1.0, training: False
                 })
                 writer.add_summary(summ, step)
@@ -808,6 +854,8 @@ if __name__ == '__main__':
         help="Directory for saving log files")
     parser.add_argument('--adapt', dest='adaptation', action='store_true',
         help="Perform domain adaptation on the model")
+    parser.add_argument('--generalize', dest='generalization', action='store_true',
+        help="Perform domain generalization on the model")
     parser.add_argument('--lstm', dest='lstm', action='store_true',
         help="Use LSTM model")
     parser.add_argument('--vrnn', dest='vrnn', action='store_true',
@@ -882,7 +930,7 @@ if __name__ == '__main__':
     parser.set_defaults(
         lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
         resnet=False, attention=False,
-        adaptation=False, balance=True, sample=False, test=False,
+        adaptation=False, generalization=False, balance=True, sample=False, test=False,
         bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
@@ -911,6 +959,7 @@ if __name__ == '__main__':
     if args.balance:
         class_weights = calc_class_weights(tfrecords_train_a,
             tfrecord_config.x_dims, tfrecord_config.num_classes,
+            tfrecord_config.num_domains,
             args.balance_pow, args.gpu_mem, args.batch)
     else:
         class_weights = 1.0
@@ -944,8 +993,13 @@ if __name__ == '__main__':
         prefix += "flat"
         model_func = build_flat
 
+    assert not (args.adaptation and args.generalization), \
+        "Currently cannot enable both adaptation and generalization at the same time"
+
     if args.adaptation:
         prefix += "-da"
+    elif args.generalization:
+        prefix += "-dg"
 
     # Use the number specified on the command line (higher precidence than --debug)
     if args.debug_num >= 0:
@@ -971,6 +1025,7 @@ if __name__ == '__main__':
 
     train(tfrecord_config.num_features,
             tfrecord_config.num_classes,
+            tfrecord_config.num_domains,
             tfrecord_config.x_dims,
             tfrecords_train_a, tfrecords_train_b,
             tfrecords_test_a, tfrecords_test_b,
@@ -979,6 +1034,7 @@ if __name__ == '__main__':
             model_dir=model_dir,
             log_dir=log_dir,
             adaptation=args.adaptation,
+            generalization=args.generalization,
             num_steps=args.steps,
             learning_rate=args.lr,
             lr_multiplier=args.lr_mult,

@@ -98,7 +98,7 @@ def get_pool_id():
 
 def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         tfrecord_config, gpu_mem, bidirectional, batch_size, units, layers,
-        feature_extractor, adaptation, last, multi_gpu=False,
+        feature_extractor, adaptation, generalization, last, multi_gpu=False,
         multi_class=False, class_weights=1.0, max_examples=0):
     # Get what GPU to run this on
     if multi_gpu:
@@ -119,6 +119,7 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
     # Get data
     num_features = tfrecord_config.num_features
     num_classes = tfrecord_config.num_classes
+    num_domains = tfrecord_config.num_domains
     x_dims = tfrecord_config.x_dims
 
     tfrecords_train_a, tfrecords_train_b, \
@@ -144,22 +145,33 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
     # Load train dataset
     with tf.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_train_a, batch_size, x_dims, num_classes, evaluation=True)
-        next_data_batch_a, next_labels_batch_a = input_fn_a()
+            tfrecords_train_a, batch_size, x_dims, num_classes, num_domains,
+            evaluation=True)
+        next_data_batch_a, next_labels_batch_a, next_domains_batch_a = input_fn_a()
     with tf.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_train_b, batch_size, x_dims, num_classes, evaluation=True)
-        next_data_batch_b, next_labels_batch_b = input_fn_b()
+            tfrecords_train_b, batch_size, x_dims, num_classes, num_domains,
+            evaluation=True)
+        next_data_batch_b, next_labels_batch_b, next_domains_batch_b = input_fn_b()
 
     # Load test dataset
     with tf.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_test_a, batch_size, x_dims, num_classes, evaluation=True)
-        next_data_batch_test_a, next_labels_batch_test_a = eval_input_fn_a()
+            tfrecords_test_a, batch_size, x_dims, num_classes, num_domains,
+            evaluation=True)
+        next_data_batch_test_a, next_labels_batch_test_a, \
+            next_domains_batch_test_a = eval_input_fn_a()
     with tf.variable_scope("evaluation_data_b"):
         eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_test_b, batch_size, x_dims, num_classes, evaluation=True)
-        next_data_batch_test_b, next_labels_batch_test_b = eval_input_fn_b()
+            tfrecords_test_b, batch_size, x_dims, num_classes, num_domains,
+            evaluation=True)
+        next_data_batch_test_b, next_labels_batch_test_b, \
+            next_domains_batch_test_b = eval_input_fn_b()
+
+    # Above we needed to load with the right number of num_domains, but for
+    # adaptation, we only want two: source and target
+    if adaptation:
+        num_domains = 2
 
     # Only build graph in this process if we're the first run, i.e. if the graph
     # isn't already built. Alternatively we could reset the graph with
@@ -191,12 +203,12 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         elif model == "flat":
             model_func = build_flat
         else:
-            raise NotImplementedError
+            raise NotImplementedError()
 
         # Inputs
         keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
         x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-        domain = tf.placeholder(tf.float32, [None, 2], name='domain') # which domain
+        domain = tf.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
         y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
         training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
         grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
@@ -205,7 +217,8 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         task_classifier, domain_classifier, _, \
         _, _, _ = \
             model_func(x, y, domain, grl_lambda, keep_prob, training,
-                num_classes, num_features, adaptation, units, layers, multi_class,
+                num_classes, num_domains, num_features, adaptation, generalization,
+                units, layers, multi_class,
                 bidirectional, class_weights, x_dims, feature_extractor)
 
         # Summaries - training and evaluation for both domains A and B
@@ -236,7 +249,8 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         input_hook_a, input_hook_b,
         next_data_batch_a, next_labels_batch_a,
         next_data_batch_b, next_labels_batch_b,
-        x, y, domain, keep_prob, training,
+        next_domains_batch_a, next_domains_batch_b,
+        x, y, domain, keep_prob, training, num_domains, generalization,
         batch_size, update_metrics_a, update_metrics_b,
         max_examples)
 
@@ -251,7 +265,8 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
         eval_input_hook_a, eval_input_hook_b,
         next_data_batch_test_a, next_labels_batch_test_a,
         next_data_batch_test_b, next_labels_batch_test_b,
-        x, y, domain, keep_prob, training,
+        next_domains_batch_test_a, next_domains_batch_test_b,
+        x, y, domain, keep_prob, training, num_domains, generalization,
         batch_size, update_metrics_a, update_metrics_b,
         max_examples)
 
@@ -312,17 +327,26 @@ if __name__ == '__main__':
         assert len(items) == 3 or len(items) == 4, \
             "name should be target-model-fold or target-model-da-fold"
 
+        adaptation = False
+        generalization = False
+
         if len(items) == 3:
             target, model, fold = items
-            adaptation = False
         else:
-            target, model, _, fold = items
-            adaptation = True
+            target, model, keyword, fold = items
+
+            if keyword == "da":
+                adaptation = True
+            elif keyword == "dg":
+                generalization = True
+            else:
+                raise NotImplementedError()
 
         model_dir = os.path.join(args.modeldir, log_dir.stem)
         assert os.path.exists(model_dir), "Model does not exist "+str(model_dir)
 
-        models_to_evaluate.append((str(log_dir), model_dir, target, model, fold, adaptation))
+        models_to_evaluate.append((str(log_dir), model_dir, target, model, fold,
+            adaptation, generalization))
 
     # If single GPU, then split memory between jobs. But, if multiple GPUs,
     # each GPU has its own memory, so don't divide it up.
@@ -342,13 +366,13 @@ if __name__ == '__main__':
     commands = []
     last_model = None
 
-    for log_dir, model_dir, target, model, fold, adaptation in models_to_evaluate:
+    for log_dir, model_dir, target, model, fold, adaptation, generalization in models_to_evaluate:
         assert last_model is None or last_model == model, \
             "all must use same model but one was "+last_model+" and another "+model
         commands.append((model_dir, log_dir, model, args.features, target, fold,
             al_config, tfrecord_config, gpu_mem, args.bidirectional, args.batch,
             args.units, args.layers, args.feature_extractor, adaptation,
-            args.last, multi_gpu))
+            generalization, args.last, multi_gpu))
 
     print("Target,Fold,Model,Best Step,Accuracy at Step")
     results = run_job_pool(process_model, commands, cores=jobs)

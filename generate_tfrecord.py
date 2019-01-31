@@ -14,29 +14,31 @@ import numpy as np
 import tensorflow as tf
 
 from pool import run_job_pool
-from load_data import one_hot, load_hdf5, ALConfig, shuffle_together_calc
+from load_data import one_hot, load_hdf5, ALConfig, shuffle_together_calc, domain_labels
 
-def create_tf_example(x, y):
+def create_tf_example(x, y, domain):
     tf_example = tf.train.Example(features=tf.train.Features(feature={
         'x': tf.train.Feature(float_list=tf.train.FloatList(value=x.flatten())),
         'y': tf.train.Feature(float_list=tf.train.FloatList(value=y)),
+        'domain': tf.train.Feature(float_list=tf.train.FloatList(value=domain)),
     }))
     return tf_example
 
-def write_tfrecord(filename, x, y):
+def write_tfrecord(filename, x, y, domain):
     """ Output to TF record file """
     assert len(x) == len(y)
     options = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.GZIP)
 
     with tf.python_io.TFRecordWriter(filename, options=options) as writer:
         for i in range(len(x)):
-            tf_example = create_tf_example(x[i], y[i])
+            tf_example = create_tf_example(x[i], y[i], domain[i])
             writer.write(tf_example.SerializeToString())
 
-def write_tfrecord_config(filename, num_features, num_classes, time_steps, x_dims):
+def write_tfrecord_config(filename, num_features, num_classes, num_domains, time_steps, x_dims):
     with open(filename, 'w') as f:
         f.write("num_features "+str(num_features)+"\n")
         f.write("num_classes "+str(num_classes)+"\n")
+        f.write("num_domains "+str(num_domains)+"\n")
         f.write("time_steps "+str(time_steps)+"\n")
         f.write("x_dims "+" ".join([str(x) for x in x_dims])+"\n")
 
@@ -95,7 +97,7 @@ def apply_normalization_meanstd(data, norms):
         out=np.zeros_like(numerator), where=denominator!=0)
     return divided
 
-def process_fold(filename, fold, name, num_classes, outputs, seed,
+def process_fold(filename, fold, name, domain, num_domains, num_classes, outputs, seed,
     separate_valid=True, valid_amount=0.2, sample=False, normalize=False):
     data = load_hdf5(filename)
     index_one = False # Labels start from 0
@@ -107,10 +109,12 @@ def process_fold(filename, fold, name, num_classes, outputs, seed,
     train_labels = np.array(data[fold]["labels_train"])
 
     train_data, train_labels = one_hot(train_data, train_labels, num_classes, index_one)
+    train_domains = domain_labels(domain, len(train_labels), num_domains)
 
     p = shuffle_together_calc(len(train_labels), seed=seed)
     train_data = train_data[p]
     train_labels = train_labels[p]
+    train_domains = train_domains[p]
 
     # Note: don't normalize by default since it ends up working better using
     # batch norm to learn a normalization of the input data. This is true on the
@@ -126,29 +130,34 @@ def process_fold(filename, fold, name, num_classes, outputs, seed,
 
         valid_data = train_data[training_end:]
         valid_labels = train_labels[training_end:]
+        valid_domains = train_domains[training_end:]
         train_data = train_data[:training_end]
         train_labels = train_labels[:training_end]
+        train_domains = train_domains[:training_end]
 
     if sample:
         train_data = train_data[:2000]
         train_labels = train_labels[:2000]
+        train_domains = train_domains[:2000]
 
         if separate_valid:
             valid_data = valid_data[:2000]
             valid_labels = valid_labels[:2000]
+            valid_domains = valid_domains[:2000]
 
     train_filename = os.path.join(outputs, name+"_train_"+fold+".tfrecord")
-    write_tfrecord(train_filename, train_data, train_labels)
+    write_tfrecord(train_filename, train_data, train_labels, train_domains)
 
     if separate_valid:
         valid_filename = os.path.join(outputs, name+"_valid_"+fold+".tfrecord")
-        write_tfrecord(valid_filename, valid_data, valid_labels)
+        write_tfrecord(valid_filename, valid_data, valid_labels, valid_domains)
 
     #
     # Test data
     #
     test_data = np.array(data[fold]["features_test"])
     test_labels = np.array(data[fold]["labels_test"])
+    test_domains = domain_labels(domain, len(test_labels), num_domains)
 
     if normalize:
         # Apply the same normalization as from the training data, since we
@@ -158,15 +167,17 @@ def process_fold(filename, fold, name, num_classes, outputs, seed,
     if sample:
         test_data = test_data[:1000]
         test_labels = test_labels[:1000]
+        test_domains = test_domains[:1000]
 
     test_data, test_labels = one_hot(test_data, test_labels, num_classes, index_one)
 
     p = shuffle_together_calc(len(test_labels), seed=seed+1)
     test_data = test_data[p]
     test_labels = test_labels[p]
+    test_domains = test_domains[p]
 
     test_filename = os.path.join(outputs, name+"_test_"+fold+".tfrecord")
-    write_tfrecord(test_filename, test_data, test_labels)
+    write_tfrecord(test_filename, test_data, test_labels, test_domains)
 
 def generate_config(feature_set, inputs="preprocessing/windows",
         outputs="datasets", fold=0):
@@ -186,6 +197,9 @@ def generate_config(feature_set, inputs="preprocessing/windows",
     # Load dimensions from this one file (assume the rest are the same)
     train_data = np.array(data[str(fold)]["features_train"])
 
+    # Number of files is number of domains
+    num_domains = len(files)
+
     # Information about dataset
     num_features = train_data.shape[2]
     time_steps = train_data.shape[1]
@@ -194,7 +208,7 @@ def generate_config(feature_set, inputs="preprocessing/windows",
     # Write out information about dimensions since tfrecord can only store
     # 1D arrays
     write_tfrecord_config(os.path.join(outputs, feature_set+".config"),
-        num_features, num_classes, time_steps, x_dims)
+        num_features, num_classes, num_domains, time_steps, x_dims)
 
 def get_keys(f):
     data = load_hdf5(f)
@@ -214,9 +228,14 @@ def generate_tfrecords(inputs="preprocessing/windows",
     commands = []
     seed = 0
 
-    for name, f in paths:
+    num_domains = len(paths) # number of homes we have data for
+
+    for i, (name, f) in enumerate(paths):
+        domain = i
+
         for fold in get_keys(f):
-            commands.append((f, fold, name, num_classes, outputs, seed))
+            commands.append((f, fold, name, domain, num_domains, num_classes,
+                outputs, seed))
             seed += 2
 
     # Process them all
@@ -240,15 +259,15 @@ if __name__ == "__main__":
     generate_config("al")
     generate_tfrecords(prefix="al")
 
-    generate_config("simple")
-    generate_tfrecords(prefix="simple")
+    # generate_config("simple")
+    # generate_tfrecords(prefix="simple")
 
-    generate_config("simple2")
-    generate_tfrecords(prefix="simple2")
+    # generate_config("simple2")
+    # generate_tfrecords(prefix="simple2")
 
-    # small-sample test (should overfit well to this -- a sanity check)
-    generate_tfrecords_sample([
-        "al_hh101", "al_hh102",
-        "simple_hh101", "simple_hh102",
-        "simple2_hh101", "simple2_hh102",
-    ])
+    # # small-sample test (should overfit well to this -- a sanity check)
+    # generate_tfrecords_sample([
+    #     "al_hh101", "al_hh102",
+    #     "simple_hh101", "simple_hh102",
+    #     "simple2_hh101", "simple2_hh102",
+    # ])

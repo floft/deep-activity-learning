@@ -184,7 +184,7 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
 
     return x
 
-def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
+def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes, num_domains,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
         prefetch_buffer_size=1, data_augmentation=False):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
@@ -195,6 +195,7 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
     feature_description = {
         'x': tf.FixedLenFeature(x_dims, tf.float32),
         'y': tf.FixedLenFeature([num_classes], tf.float32),
+        'domain': tf.FixedLenFeature([num_domains], tf.float32),
     }
 
     def _parse_function(example_proto):
@@ -203,12 +204,13 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         parsed = tf.parse_example(example_proto, feature_description)
         x = parsed["x"]
         y = parsed["y"]
+        domain = parsed["domain"]
 
         # Perform data augmentation
         if data_augmentation:
             x = perform_data_augmentation(x)
 
-        return x, y
+        return x, y, domain
 
     def input_fn():
         # Interleave the tfrecord files
@@ -232,12 +234,12 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes,
         dataset = dataset.prefetch(prefetch_buffer_size)
 
         iterator = dataset.make_initializable_iterator()
-        next_data_batch, next_label_batch = iterator.get_next()
+        next_data_batch, next_label_batch, next_domain_batch = iterator.get_next()
 
         # Need to initialize iterator after creating a session in the estimator
         iter_init_hook.iter_init_func = lambda sess: sess.run(iterator.initializer)
 
-        return next_data_batch, next_label_batch
+        return next_data_batch, next_label_batch, next_domain_batch
     return input_fn, iter_init_hook
 
 def one_hot(x, y, num_classes, index_one=False):
@@ -276,13 +278,13 @@ def one_hot(x, y, num_classes, index_one=False):
 
     return x, y
 
-def tf_domain_labels(label, batch_size):
+def tf_domain_labels(label, batch_size, num_domains=2):
     """ Generate one-hot encoded labels for which domain data is from (using TensorFlow) """
-    return tf.tile(tf.one_hot([0], depth=2), [batch_size,1])
+    return tf.tile(tf.one_hot([0], depth=num_domains), [batch_size,1])
 
-def domain_labels(label, batch_size):
+def domain_labels(label, batch_size, num_domains=2):
     """ Generate one-hot encoded labels for which domain data is from (using numpy) """
-    return np.tile(np.eye(2)[label], [batch_size,1])
+    return np.tile(np.eye(num_domains)[label], [batch_size,1])
 
 def shuffle_together(a, b, seed=None):
     """ Shuffle two lists in unison https://stackoverflow.com/a/13343383/2698494 """
@@ -466,13 +468,13 @@ def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="dat
         tfrecords_valid_a, tfrecords_valid_b, \
         tfrecords_test_a, tfrecords_test_b
 
-def calc_class_weights(filenames, x_dims, num_classes, balance_pow=1.0,
+def calc_class_weights(filenames, x_dims, num_classes, num_domains, balance_pow=1.0,
         gpu_mem=0.8, batch_size=1024):
     # Since we're using a .tfrecord file, we need to load the data and sum
     # how many instances of each class there are in batches
     input_fn, input_hook = _get_tfrecord_input_fn(
-        filenames, batch_size, x_dims, num_classes, count=True)
-    _, next_labels_batch = input_fn()
+        filenames, batch_size, x_dims, num_classes, num_domains, count=True)
+    _, next_labels_batch, _ = input_fn()
 
     total = 0
     counts = np.zeros((num_classes,), dtype=np.int32)
@@ -565,6 +567,7 @@ class TFRecordConfig:
         """ Gets the possible features and labels """
         self.num_features = None
         self.num_classes = None
+        self.num_domains = None
         self.time_steps = None
         self.x_dims = None
 
@@ -582,11 +585,15 @@ class TFRecordConfig:
                     elif items[0] == "num_classes":
                         self.num_classes = int(items[1])
                         assert len(items) == 2, "format: num_classes int"
+                    elif items[0] == "num_domains":
+                        self.num_domains = int(items[1])
+                        assert len(items) == 2, "format: num_domains int"
                     elif items[0] == "time_steps":
                         self.time_steps = int(items[1])
                         assert len(items) == 2, "format: time_steps int"
 
         assert self.num_features is not None, "no \"num_features\" in .config"
         assert self.num_classes is not None, "no \"num_classes\" in .config"
+        assert self.num_domains is not None, "no \"num_domains\" in .config"
         assert self.time_steps is not None, "no \"time_steps\" in .config"
         assert self.x_dims is not None, "no \"x_dims\" in .config"

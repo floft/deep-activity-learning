@@ -20,6 +20,7 @@ graph.pbtxt
 
 # Processing results
 *.csv
+*.ods
 
 # Compiled
 convert

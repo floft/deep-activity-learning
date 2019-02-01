@@ -1030,10 +1030,11 @@ if __name__ == '__main__':
         prefix += "-"+str(attempt)
         model_dir = os.path.join(args.modeldir, prefix)
         log_dir = os.path.join(args.logdir, prefix)
-    # If no debugging modes, use the model and log directory as-is
+    # If no debugging modes, use the model and log directory with only the "prefix"
+    # (even though it's not actually a prefix in this case, it's the whole name)
     else:
-        model_dir = args.modeldir
-        log_dir = args.logdir
+        model_dir = os.path.join(args.modeldir, prefix)
+        log_dir = os.path.join(args.logdir, prefix)
 
     train(tfrecord_config.num_features,
             tfrecord_config.num_classes,

@@ -262,8 +262,8 @@ if __name__ == "__main__":
     # generate_config("simple")
     # generate_tfrecords(prefix="simple")
 
-    # generate_config("simple2")
-    # generate_tfrecords(prefix="simple2")
+    generate_config("simple2")
+    generate_tfrecords(prefix="simple2")
 
     # # small-sample test (should overfit well to this -- a sanity check)
     # generate_tfrecords_sample([

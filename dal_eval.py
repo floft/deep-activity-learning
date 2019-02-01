@@ -287,8 +287,10 @@ if __name__ == '__main__':
         help="Directory for saving model files")
     parser.add_argument('--logdir', default="logs", type=str,
         help="Directory for saving log files")
-    parser.add_argument('--features', default="simple", type=str,
-        help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
+    parser.add_argument('--match', default="*-*-*", type=str,
+        help="String matching to determine which logs/models to process (default *-*-*)")
+    parser.add_argument('--features', default="al", type=str,
+        help="Whether to use \"al\", \"simple\", or \"simple2\" features (default \"al\")")
     parser.add_argument('--jobs', default=4, type=int,
         help="Number of TensorFlow jobs to run at once (default 4)")
     parser.add_argument('--gpus', default=1, type=int,
@@ -319,28 +321,29 @@ if __name__ == '__main__':
         "al.config and tfrecord config disagree on the number of classes: " \
         +str(len(al_config.labels))+" vs. "+str(tfrecord_config.num_classes)
 
-    files = pathlib.Path(args.logdir).glob("*-*-*")
+    files = pathlib.Path(args.logdir).glob(args.match)
     models_to_evaluate = []
 
     for log_dir in files:
         items = str(log_dir.stem).split("-")
-        assert len(items) == 3 or len(items) == 4, \
-            "name should be target-model-fold or target-model-da-fold"
+        assert len(items) >= 3 or len(items) <= 5, \
+            "name should be one of target-foldX-model{-d{a,g}{-num,},-num,}"
 
         adaptation = False
         generalization = False
 
         if len(items) == 3:
-            target, model, fold = items
-        else:
-            target, model, keyword, fold = items
+            target, fold, model = items
+        elif len(items) == 4 or len(items) == 5:
+            target, fold, model, keyword = items[:4]
+            fold = int(fold.replace("fold",""))
 
             if keyword == "da":
                 adaptation = True
             elif keyword == "dg":
                 generalization = True
             else:
-                raise NotImplementedError()
+                pass # probably a debug number, which we don't care about
 
         model_dir = os.path.join(args.modeldir, log_dir.stem)
         assert os.path.exists(model_dir), "Model does not exist "+str(model_dir)
@@ -376,7 +379,6 @@ if __name__ == '__main__':
 
     print("Target,Fold,Model,Best Step,Accuracy at Step")
     results = run_job_pool(process_model, commands, cores=jobs)
-    print()
 
     # Process results
     source_train = []
@@ -386,7 +388,7 @@ if __name__ == '__main__':
 
     print("Target,Fold,Train A,Test A,Train B,Test B")
     for target, fold, s_train, t_train, s_test, t_test in results:
-        print(target+","+fold+","+ \
+        print(target+","+str(fold)+","+ \
             str(s_train)+","+str(s_test)+","+ \
             str(t_train)+","+str(t_test))
 

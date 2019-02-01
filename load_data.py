@@ -450,7 +450,8 @@ def get_tfrecord_traintest_datasets(feature_set, target, fold, dataset, sample, 
         tfrecords_a.append(f)
 
     # Target
-    assert target_file is not None, "Did not find target \""+target+"\""
+    assert target_file is not None, \
+        "Did not find target "+target+" fold "+str(fold)
     tfrecords_b.append(target_file)
 
     return tfrecords_a, tfrecords_b

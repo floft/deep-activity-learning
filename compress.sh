@@ -7,5 +7,5 @@ c() {
 }
 
 c "al"
-c "simple"
+#c "simple"
 c "simple2"

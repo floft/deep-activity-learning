@@ -438,7 +438,8 @@ def train(
         bidirectional=False,
         class_weights=1.0,
         plot_gradients=False,
-        min_domain_accuracy=0.60,
+        min_domain_accuracy=0.5,
+        max_domain_iters=10,
         gpu_memory=0.8,
         max_examples=0,
         max_plot_examples=100,
@@ -681,11 +682,22 @@ def train(
                     keep_prob: dropout_keep_prob, lr: lr_value, training: True
                 })
 
-                sess.run(train_domain, feed_dict={
-                    x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
-                    grl_lambda: 0.0,
-                    keep_prob: dropout_keep_prob, lr: lr_multiplier*lr_value, training: True
-                })
+                # Update discriminator till it's accurate enough
+                for j in range(max_domain_iters):
+                    feed_dict = {
+                        x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
+                        grl_lambda: 0.0,
+                        keep_prob: dropout_keep_prob, lr: lr_multiplier*lr_value, training: True
+                    }
+                    sess.run(train_domain, feed_dict=feed_dict)
+
+                    # Break if high enough accuracy
+                    domain_acc = sess.run(domain_accuracy, feed_dict=feed_dict)
+
+                    if domain_acc > min_domain_accuracy:
+                        break
+
+                print("Iteration", i, "Domain iters", j, "domain acc", domain_acc)
             else:
                 # Train task classifier on source domain to be correct
                 sess.run(train_notdomain, feed_dict={
@@ -969,7 +981,7 @@ if __name__ == '__main__':
         + args.attention == 1, \
         "Must specify exactly one method to run"
 
-    prefix = args.target+"-"
+    prefix = args.target+"-fold"+str(args.fold)+"-"
 
     if args.lstm:
         prefix += "lstm"

@@ -9,6 +9,7 @@ This takes a model trained by dal.py and evaluates it on both:
 It'll output the {source,target}-{train,test} accuracies for comparison with AL.
 """
 import os
+import sys
 import pathlib
 import argparse
 import multiprocessing
@@ -41,10 +42,17 @@ def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation'):
     logfile = last_modified(log_dir, "*.tfevents*")
 
     task_accuracy = []
-    for e in tf.train.summary_iterator(logfile):
-        for v in e.summary.value:
-            if v.tag == tag:
-                task_accuracy.append((e.step, v.simple_value))
+    try:
+        for e in tf.train.summary_iterator(logfile):
+            for v in e.summary.value:
+                if v.tag == tag:
+                    task_accuracy.append((e.step, v.simple_value))
+    except tf.errors.DataLossError:
+        # Skip DataLossErrors since it's probably since we're still writing to
+        # the file (i.e. if we run eval during training).
+        print("Warning: DataLossError -- found " + str(len(task_accuracy)) \
+            + ", skipping remainder of file", file=sys.stderr)
+        sys.stderr.flush()
 
     # Sort by accuracy -- but only if we didn't choose to use the last model.
     # In that case, the ...[-1] will pick the last one, so all we have to do
@@ -404,18 +412,22 @@ if __name__ == '__main__':
     target_train = np.array(target_train)
     target_test = np.array(target_test)
 
-    print()
-    print()
-    print("Dataset,Avg,Std")
-    print("Train A,"+str(source_train.mean())+","+str(source_train.std()))
-    print("Test A,"+str(source_test.mean())+","+str(source_test.std()))
-    print("Train B,"+str(target_train.mean())+","+str(target_train.std()))
-    print("Test B,"+str(target_test.mean())+","+str(target_test.std()))
+    if len(source_train) > 0 and len(source_test) > 0 \
+            and len(target_train) > 0 and len(target_test) > 0:
+        print()
+        print()
+        print("Dataset,Avg,Std")
+        print("Train A,"+str(source_train.mean())+","+str(source_train.std()))
+        print("Test A,"+str(source_test.mean())+","+str(source_test.std()))
+        print("Train B,"+str(target_train.mean())+","+str(target_train.std()))
+        print("Test B,"+str(target_test.mean())+","+str(target_test.std()))
 
-    print()
-    print()
-    print("Averages over", len(source_train), "runs (each home is 3-fold CV)")
-    print("Train A \t Avg:", source_train.mean(), "\t Std:", source_train.std())
-    print("Test A  \t Avg:", source_test.mean(), "\t Std:", source_test.std())
-    print("Train B \t Avg:", target_train.mean(), "\t Std:", target_train.std())
-    print("Test B  \t Avg:", target_test.mean(), "\t Std:", target_test.std())
+        print()
+        print()
+        print("Averages over", len(source_train), "runs (each home is 3-fold CV)")
+        print("Train A \t Avg:", source_train.mean(), "\t Std:", source_train.std())
+        print("Test A  \t Avg:", source_test.mean(), "\t Std:", source_test.std())
+        print("Train B \t Avg:", target_train.mean(), "\t Std:", target_train.std())
+        print("Test B  \t Avg:", target_test.mean(), "\t Std:", target_test.std())
+    else:
+        print("No data.")

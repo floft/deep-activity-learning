@@ -336,7 +336,6 @@ if __name__ == '__main__':
             target, fold, model = items
         elif len(items) == 4 or len(items) == 5:
             target, fold, model, keyword = items[:4]
-            fold = int(fold.replace("fold",""))
 
             if keyword == "da":
                 adaptation = True
@@ -344,6 +343,9 @@ if __name__ == '__main__':
                 generalization = True
             else:
                 pass # probably a debug number, which we don't care about
+
+        # Fold name is foldX, get just the X and convert to int
+        fold = int(fold.replace("fold",""))
 
         model_dir = os.path.join(args.modeldir, log_dir.stem)
         assert os.path.exists(model_dir), "Model does not exist "+str(model_dir)

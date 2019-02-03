@@ -96,7 +96,7 @@ def classifier(x, num_classes, keep_prob, training, batch_norm, units=50, num_la
 def build_model(x, y, domain, grl_lambda, keep_prob, training,
         num_classes, num_domains, adaptation=True, generalization=False,
         multi_class=False, class_weights=1.0, units=50, layers=5,
-        batch_norm=True, log_outputs=True,
+        batch_norm=True, log_outputs=False,
         use_grl=True, use_feature_extractor=True):
     """
     Creates the feature extractor, task classifier, domain classifier

@@ -715,7 +715,9 @@ def train(
                     if domain_acc > min_domain_accuracy:
                         break
 
-                print("Iteration", i, "Domain iters", j, "domain acc", domain_acc)
+                # For debugging, print occasionally
+                if i%1000 == 0:
+                    print("Iteration", i, "Domain iters", j, "domain acc", domain_acc)
             else:
                 # Train task classifier on source domain to be correct
                 sess.run(train_notdomain, feed_dict={

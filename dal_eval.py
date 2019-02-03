@@ -22,71 +22,7 @@ from load_data import _get_tfrecord_input_fn, get_tfrecord_datasets, \
     ALConfig, TFRecordConfig
 from dal import last_modified_number, update_metrics_on_val, metric_summaries
 from pool import run_job_pool
-
-def last_modified(dir_name, glob):
-    """
-    Looks in dir_name at all files matching glob and returns the file last
-    modified
-    """
-    files = pathlib.Path(dir_name).glob(glob)
-    files = sorted(files, key=lambda cp:cp.stat().st_mtime)
-
-    if len(files) > 0:
-        return str(files[-1])
-
-    return None
-
-def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation'):
-    # Open the log file generated during training, find the step with the
-    # highest validation accuracy
-    logfile = last_modified(log_dir, "*.tfevents*")
-
-    task_accuracy = []
-    try:
-        for e in tf.train.summary_iterator(logfile):
-            for v in e.summary.value:
-                if v.tag == tag:
-                    task_accuracy.append((e.step, v.simple_value))
-    except tf.errors.DataLossError:
-        # Skip DataLossErrors since it's probably since we're still writing to
-        # the file (i.e. if we run eval during training).
-        print("Warning: DataLossError -- found " + str(len(task_accuracy)) \
-            + ", skipping remainder of file", file=sys.stderr)
-        sys.stderr.flush()
-
-    # Sort by accuracy -- but only if we didn't choose to use the last model.
-    # In that case, the ...[-1] will pick the last one, so all we have to do
-    # is not sort this.
-    if not last:
-        task_accuracy.sort(key=lambda tup: tup[1])
-
-    assert len(task_accuracy) > 0, \
-        "task_accuracy empty for log"+logfile+": "+str(task_accuracy)
-
-    max_accuracy = task_accuracy[-1][1]
-    max_accuracy_step = task_accuracy[-1][0]
-
-    return max_accuracy_step, max_accuracy
-
-def get_checkpoint(model_dir, step):
-    """
-    Load corresponding checkpoint -- if it doesn't exist, then it probably
-    saved the iter-1 as a checkpoint. For example, most evaluations are at
-    iterations like 84001 but the checkpoint was at iteration 84000.
-
-    Returns the checkpoint filename and the step we actually loaded (may or
-    may not be the one specified, but should be +/- 1)
-    """
-    ckpt = os.path.join(model_dir, "model.ckpt-"+str(step))
-
-    if not os.path.exists(ckpt+".index"):
-        step -= 1
-        ckpt = os.path.join(model_dir, "model.ckpt-"+str(step))
-
-        assert os.path.exists(ckpt+".index"), \
-            "could not find model checkpoint "+ckpt
-
-    return ckpt, step
+from eval_utils import get_step_from_log, get_checkpoint
 
 def get_gpus():
     """

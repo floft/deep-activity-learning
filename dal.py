@@ -5,12 +5,9 @@ Deep activity learning
 (code based on my TF implementation of VRADA: https://github.com/floft/vrada)
 """
 import os
-import re
 import time
 import argparse
-import pathlib
 import numpy as np
-import pandas as pd
 import tensorflow as tf
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
@@ -26,6 +23,7 @@ from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat, \
 from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
     domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
     calc_class_weights
+from eval_utils import last_modified_number, get_files_to_keep, delete_models_except
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -412,6 +410,25 @@ def opt_with_summ(optimizer, loss, var_list=None):
 
     return update_step, summaries
 
+class RemoveOldCheckpointSaverListener(tf.train.CheckpointSaverListener):
+    """
+    Remove checkpoints that are not the best or the last one so we don't waste
+    tons of disk space
+    """
+    def __init__(self, log_dir, model_dir):
+        self.log_dir = log_dir
+        self.model_dir = model_dir
+        super().__init__()
+
+    def before_save(self, session, global_step_value):
+        """
+        Do this right before saving, to make sure we don't mistakingly delete
+        the one we just saved in after_save. This will in effect keep the last
+        two instead of just the last one.
+        """
+        best, last = get_files_to_keep(self.log_dir)
+        delete_models_except(self.model_dir, best, last)
+
 def train(
         num_features, num_classes, num_domains, x_dims,
         tfrecords_train_a, tfrecords_train_b,
@@ -592,8 +609,9 @@ def train(
 
     # Keep track of state and summaries
     saver = tf.train.Saver(max_to_keep=num_steps)
+    saver_listener = RemoveOldCheckpointSaverListener(log_dir, model_dir)
     saver_hook = tf.train.CheckpointSaverHook(model_dir,
-        save_steps=model_save_steps, saver=saver)
+        save_steps=model_save_steps, saver=saver, listeners=[saver_listener])
     writer = tf.summary.FileWriter(log_dir)
 
     # Allow running two at once
@@ -838,25 +856,6 @@ def train(
                 writer.flush()
 
         writer.flush()
-
-def last_modified_number(dir_name, glob):
-    """
-    Looks in dir_name at all files matching glob and takes number
-    from the one last modified
-    """
-    files = pathlib.Path(dir_name).glob(glob)
-    files = sorted(files, key=lambda cp:cp.stat().st_mtime)
-
-    if len(files) > 0:
-        # Get number from filename
-        regex = re.compile(r'\d+')
-        numbers = [int(x) for x in regex.findall(str(files[-1]))]
-        assert len(numbers) == 1, "Could not determine number from last modified file"
-        last = numbers[0]
-
-        return last
-
-    return None
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

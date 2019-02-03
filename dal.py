@@ -886,8 +886,8 @@ if __name__ == '__main__':
         help="What fold to use from the dataset files (default fold 0)")
     parser.add_argument('--target', default="hh101", type=str,
         help="What dataset to use as the target (default \"hh101\")")
-    parser.add_argument('--features', default="simple", type=str,
-        help="Whether to use \"al\" or \"simple\" features (default \"simple\")")
+    parser.add_argument('--features', default="al", type=str,
+        help="Whether to use \"al\", \"simple\", or \"simple2\" features (default \"al\")")
     parser.add_argument('--units', default=50, type=int,
         help="Number of LSTM hidden units and VRNN latent variable size (default 50)")
     parser.add_argument('--layers', default=5, type=int,

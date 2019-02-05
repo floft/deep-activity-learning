@@ -6,6 +6,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
+from hyperparameter_tuning_commands import output_command
+
 def get_tuning_files(dir_name, prefix="dal_results_cv-"):
     """ Get all the hyperparameter evaluation result files """
     files = []
@@ -94,6 +96,34 @@ def compute_eval_stats(df):
     data = [[name]+list(compute_mean_std(df, name)) for name in names]
     return pd.DataFrame(data=data, columns=["Dataset", "Avg", "Std"])
 
+def parse_name(name):
+    # Get values
+    values = name.split("-")
+
+    batch = values[0].replace("b", "")
+    lr = values[1].replace("l", "")
+    balance = values[2]
+    units = values[3].replace("u", "")
+    layers = values[4].replace("l", "")
+    dropout = values[5].replace("d", "")
+
+    # Put into correct ranges
+    batch = 2**int(batch)
+    lr = 10**(-int(lr))
+    balance = balance == "b"
+    units = int(units)
+    layers = int(layers)
+    dropout = int(dropout)/100
+
+    return {
+        "batch": batch,
+        "lr": lr,
+        "balance": balance,
+        "units": units,
+        "layers": layers,
+        "dropout": dropout
+    }
+
 def all_stats(files, recompute_averages=False, sort_on_test=False, sort_on_b=False):
     stats = []
 
@@ -107,6 +137,7 @@ def all_stats(files, recompute_averages=False, sort_on_test=False, sort_on_b=Fal
 
         stats.append({
             "name": name,
+            "parameters": parse_name(name),
             "file": file,
             "validation": validation,
             "traintest": traintest,
@@ -125,6 +156,47 @@ def all_stats(files, recompute_averages=False, sort_on_test=False, sort_on_b=Fal
         stats.sort(key=lambda x: x["validavg"][0])
 
     return stats
+
+def optimize_parameters(stats):
+    """
+    Optimize each parameter individually, i.e. we're assuming convexity here.
+
+    Pick the best value for each parameter based on what gives the highest
+    validation accuracy. Then we'll train that model and see if it does even
+    better (it probably won't since the hyperparameter space is probably not
+    convex).
+    """
+    parameter_names = list(stats[0]["parameters"].keys())
+    best_params = {}
+    best_params_accuracy = {}
+
+    for p in parameter_names:
+        param_values = {}
+
+        for s in stats:
+            param_value = s["parameters"][p]
+            accuracy = s["validavg"][0]
+
+            if param_value not in param_values:
+                param_values[param_value] = [accuracy]
+            else:
+                param_values[param_value].append(accuracy)
+
+        averages = {}
+
+        for param_value, accuracy in param_values.items():
+            averages[param_value] = (
+                np.array(accuracy).mean(),
+                np.array(accuracy).std()
+            )
+
+        averages = sorted(list(averages.items()), key=lambda x: x[1][0])
+        best = averages[-1]
+
+        best_params[p] = best[0]
+        best_params_accuracy[p] = best[1]
+
+    return best_params, best_params_accuracy
 
 if __name__ == "__main__":
     files = get_tuning_files(".")
@@ -145,3 +217,24 @@ if __name__ == "__main__":
     best = all_stats(files, sort_on_b=True)[-1]
     print("Best on Test B (cheating) -", best["name"])
     print(best["averages"])
+    print()
+
+    # Optimize parameters
+    stats = all_stats(files)
+    best_params, best_params_accuracy = optimize_parameters(stats)
+    print("Best Parameters")
+    print(best_params)
+    print(best_params_accuracy)
+    print()
+
+    print("Run with best parameters:")
+    command = output_command(
+        best_params["batch"],
+        best_params["lr"],
+        best_params["balance"],
+        best_params["units"],
+        best_params["layers"],
+        best_params["dropout"]
+    )
+    print(command[0])
+    print(command[1])

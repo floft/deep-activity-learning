@@ -10,7 +10,7 @@ def generate_values(N):
     #lr = np.around(10**(-np.random.uniform(2,5,size=N)), decimals=6)
     lr = 10.0**(-np.random.randint(3,6,N)) # 0.001 to 0.00001 by powers of 10
     balance = np.random.uniform(size=N) < 0.5 # True or False
-    units = np.random.randint(1,21,size=N)*10 # 10 to 200
+    units = np.random.randint(1,21,size=N)*10 # 10 to 200 by 10's
     layers = np.random.randint(1,13,size=N) # 1 to 12
     dropout = 5*np.random.randint(10,21,N)/100 # 0.5 to 1.0 by 0.05's
 
@@ -44,11 +44,11 @@ def output_command(batch, lr, balance, units, layers, dropout):
 
     args = "--dataset=al.zip " \
         + "--features=al " \
-        + "--flat " \
         + "--units="+str(units) + " " \
         + "--layers="+str(layers)
 
     train_args = args + " " \
+        + "--flat " \
         + "--batch="+str(batch) + " " \
         + "--lr=%.5f "%lr \
         + balance + " " \

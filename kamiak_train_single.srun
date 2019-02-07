@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=3
 #SBATCH --nodes=1-1
-#SBATCH --gres=gpu:tesla:1
+#SBATCH --gres=gpu:1
 #SBATCH --partition=taylor,cahnrs_gpu,free_gpu,hpc_club,kamiak
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=20G

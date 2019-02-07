@@ -426,7 +426,9 @@ class RemoveOldCheckpointSaverListener(tf.train.CheckpointSaverListener):
         the one we just saved in after_save. This will in effect keep the last
         two instead of just the last one.
         """
-        best, last = get_files_to_keep(self.log_dir)
+        # Don't warn since we know there will be a DataLossError since we're
+        # still training and the file isn't complete yet.
+        best, last = get_files_to_keep(self.log_dir, warn=False)
         delete_models_except(self.model_dir, best, last)
 
 def train(

@@ -39,7 +39,8 @@ def last_modified(dir_name, glob):
 
     return None
 
-def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation'):
+def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
+        warn=True):
     # Open the log file generated during training, find the step with the
     # highest validation accuracy
     logfile = last_modified(log_dir, "*.tfevents*")
@@ -55,11 +56,12 @@ def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation'):
                 if v.tag == tag:
                     task_accuracy.append((e.step, v.simple_value))
     except tf.errors.DataLossError:
-        # Skip DataLossErrors since it's probably since we're still writing to
-        # the file (i.e. if we run eval during training).
-        print("Warning: DataLossError -- found " + str(len(task_accuracy)) \
-            + ", skipping remainder of file", file=sys.stderr)
-        sys.stderr.flush()
+        if warn:
+            # Skip DataLossErrors since it's probably since we're still writing to
+            # the file (i.e. if we run eval during training).
+            print("Warning: DataLossError -- found " + str(len(task_accuracy)) \
+                + ", skipping remainder of file", file=sys.stderr)
+            sys.stderr.flush()
 
     # Sort by accuracy -- but only if we didn't choose to use the last model.
     # In that case, the ...[-1] will pick the last one, so all we have to do
@@ -95,9 +97,9 @@ def get_checkpoint(model_dir, step):
 
     return ckpt, step
 
-def get_files_to_keep(log_dir):
-    best, _ = get_step_from_log(log_dir, last=False)
-    last, _ = get_step_from_log(log_dir, last=True)
+def get_files_to_keep(log_dir, warn=True):
+    best, _ = get_step_from_log(log_dir, last=False, warn=warn)
+    last, _ = get_step_from_log(log_dir, last=True, warn=warn)
 
     return best, last
 

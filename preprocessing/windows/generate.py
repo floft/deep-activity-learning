@@ -214,7 +214,7 @@ def create_dataset(
 if __name__ == "__main__":
     create_dataset("../al-features", "al",
         window_size=1) # each uses window of size 30
-    create_dataset("../simple-features", "simple",
-        window_size=30)
+    # create_dataset("../simple-features", "simple",
+    #     window_size=30)
     create_dataset("../simple2-features", "simple2",
         window_size=30)

@@ -15,6 +15,7 @@ import tensorflow as tf
 
 from pool import run_job_pool
 from load_data import one_hot, load_hdf5, ALConfig, shuffle_together_calc, domain_labels
+from preprocessing.windows.generate import cross_validation_indices
 
 def create_tf_example(x, y, domain):
     tf_example = tf.train.Example(features=tf.train.Features(feature={
@@ -98,7 +99,23 @@ def apply_normalization_meanstd(data, norms):
     return divided
 
 def process_fold(filename, fold, name, domain, num_domains, num_classes, outputs, seed,
-    separate_valid=True, valid_amount=0.2, sample=False, normalize=False):
+        separate_valid=True, valid_amount=0.2, timesplit_valid=True, valid_folds=4,
+        sample=False, normalize=False):
+    """
+    Validation data: create if separate_valid == True
+    if timesplit_valid==True:
+        split into valid_folds folds based on TimeSeriesSplit and take the last
+        fold (i.e. largest train/valid fold where all data is used).
+
+        amount of validation data = 1/(valid_folds+1)
+        valid_folds=3 ==> ~25% validation data
+        valid_folds=4 ==> ~20% validation data
+        valid_folds=5 ==> ~16% validation data
+        valid_folds=9 ==> ~10% validation data
+    else:
+        take validation data from training data i.i.d. with valid_amount going
+        to the validation dataset
+    """
     data = load_hdf5(filename)
     index_one = False # Labels start from 0
 
@@ -126,14 +143,29 @@ def process_fold(filename, fold, name, domain, num_domains, num_classes, outputs
 
     # Split out valid data
     if separate_valid:
-        training_end = math.ceil((1-valid_amount)*len(train_data))
+        if timesplit_valid:
+            # Get the indices for the folds based on a time-series split
+            train_indices, test_indices = cross_validation_indices(valid_folds, train_data)
 
-        valid_data = train_data[training_end:]
-        valid_labels = train_labels[training_end:]
-        valid_domains = train_domains[training_end:]
-        train_data = train_data[:training_end]
-        train_labels = train_labels[:training_end]
-        train_domains = train_domains[:training_end]
+            # Take the last fold, i.e. all the data is either in train or valid.
+            train_indices = train_indices[-1]
+            test_indices = test_indices[-1]
+
+            valid_data = train_data[test_indices]
+            valid_labels = train_labels[test_indices]
+            valid_domains = train_domains[test_indices]
+            train_data = train_data[train_indices]
+            train_labels = train_labels[train_indices]
+            train_domains = train_domains[train_indices]
+        else:
+            training_end = math.ceil((1-valid_amount)*len(train_data))
+
+            valid_data = train_data[training_end:]
+            valid_labels = train_labels[training_end:]
+            valid_domains = train_domains[training_end:]
+            train_data = train_data[:training_end]
+            train_labels = train_labels[:training_end]
+            train_domains = train_domains[:training_end]
 
     if sample:
         train_data = train_data[:2000]

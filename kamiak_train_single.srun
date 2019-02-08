@@ -13,8 +13,8 @@
 # Note: if changing time above, also change on scratch dir command
 
 #
-# This script runs one network. You must specify what target you want e.g.
-# --target=hh101 as an argument. Also, specify the fold.
+# This script runs one network. You must specify the fold and if doing adaptation
+# the target.
 #
 
 . kamiak_config.sh
@@ -86,9 +86,8 @@ cd "$SCRATCHDIR"
 echo " - program"
 cp -a "$data"/*.py .
 echo " - dataset"
-# TODO
-#cp -a "$data/$compressedDataset" .
-#unzip "$compressedDataset"
+cp -a "$data/$compressedDataset" .
+unzip "$compressedDataset"
 echo " - config file"
 mkdir -p preprocessing/al-features/
 cp -a "$data/preprocessing/al-features/al.config" preprocessing/al-features/
@@ -106,8 +105,6 @@ echo "Making sure TensorFlow installed: done"
 echo "Training network: started"
 mkdir -p "$data/$logFolder/" # log dir, rsync this to view with TensorBoard
 
-# TODO keeps on dying, so don't copy data, just use it in $data folder
-cd "$data"
 python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
     --gpu-mem=0.9 "${program_args[@]}"
 

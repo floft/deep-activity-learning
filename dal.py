@@ -988,12 +988,15 @@ if __name__ == '__main__':
     tfrecords_test_a, tfrecords_test_b = \
         get_tfrecord_datasets(args.features, args.target, args.fold, args.sample)
 
-    # We'll test on the validation set actually, then in dal_eval.py evaluate
-    # on the real test set. In dal_eval.py we'll pick the model that had the
-    # highest accuracy on the validation set.
-    #
-    # Unless, we specifically want to test on the actual test set...
-    if not args.test:
+    # If testing, then we'll test on the real test set and add the validation data
+    # to the training set. Otherwise, if not testing, then the "test" set is the
+    # validation data -- e.g. for hyperparameter tuning we evaluate on validation
+    # data and pick the best model, then set --test and train on train/valid sets
+    # and evaluate on the real test set.
+    if args.test:
+        tfrecords_train_a += tfrecords_valid_a
+        tfrecords_train_b += tfrecords_valid_b
+    else:
         tfrecords_test_a = tfrecords_valid_a
         tfrecords_test_b = tfrecords_valid_b
 

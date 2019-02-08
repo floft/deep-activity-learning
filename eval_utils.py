@@ -69,8 +69,12 @@ def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
     if not last:
         task_accuracy.sort(key=lambda tup: tup[1])
 
+    # If no data in the log file, then ignore it
+    if len(task_accuracy) == 0:
+        return None, None
+
     assert len(task_accuracy) > 0, \
-        "task_accuracy empty for log"+logfile+": "+str(task_accuracy)
+        "task_accuracy empty for log "+logfile+": "+str(task_accuracy)
 
     max_accuracy = task_accuracy[-1][1]
     max_accuracy_step = task_accuracy[-1][0]

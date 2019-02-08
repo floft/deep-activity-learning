@@ -131,6 +131,10 @@ def process_fold(filename, fold, name, domain, num_domains, num_classes, outputs
     # For time-series validation split, we have to split before shuffling
     if separate_valid and timesplit_valid:
         # Get the indices for the folds based on a time-series split
+        #
+        # Note: there is a little bit of overlap between train/valid because at
+        # this point we've already generated the windows, which the default uses
+        # overlapping windows. However, this is probably negligible.
         train_indices, test_indices = cross_validation_indices(valid_folds, train_data)
 
         # Take the last fold, i.e. all the data is either in train or valid.

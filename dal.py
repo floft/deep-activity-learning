@@ -55,75 +55,81 @@ def update_metrics_on_val(sess,
     # Evaluate all if max_examples == 0
     #
     # Domain A
-    while max_examples == 0 or examples < max_examples:
-        try:
-            # Get next evaluation batch
-            eval_data_a, eval_labels_a, eval_domains_a = sess.run([
-                next_data_batch_test_a, next_labels_batch_test_a,
-                next_domains_batch_test_a,
-            ])
+    if next_data_batch_test_a is not None and \
+        next_labels_batch_test_a is not None and \
+        next_domains_batch_test_a is not None:
+        while max_examples == 0 or examples < max_examples:
+            try:
+                # Get next evaluation batch
+                eval_data_a, eval_labels_a, eval_domains_a = sess.run([
+                    next_data_batch_test_a, next_labels_batch_test_a,
+                    next_domains_batch_test_a,
+                ])
 
-            # Make sure we don't go over the desired number of examples
-            # But, only if we don't want to evaluate all examples (i.e. if
-            # max_examples == 0)
-            if max_examples != 0:
-                diff = max_examples - examples
+                # Make sure we don't go over the desired number of examples
+                # But, only if we don't want to evaluate all examples (i.e. if
+                # max_examples == 0)
+                if max_examples != 0:
+                    diff = max_examples - examples
 
-                if examples + eval_data_a.shape[0] > max_examples:
-                    eval_data_a = eval_data_a[:diff]
-                    eval_labels_a = eval_labels_a[:diff]
+                    if examples + eval_data_a.shape[0] > max_examples:
+                        eval_data_a = eval_data_a[:diff]
+                        eval_labels_a = eval_labels_a[:diff]
 
-            examples += eval_data_a.shape[0]
+                examples += eval_data_a.shape[0]
 
-            if generalization:
-                source_domain = eval_domains_a
-            else:
-                # Match the number of examples we have
-                source_domain = domain_labels(0, eval_data_a.shape[0], num_domains)
+                if generalization:
+                    source_domain = eval_domains_a
+                else:
+                    # Match the number of examples we have
+                    source_domain = domain_labels(0, eval_data_a.shape[0], num_domains)
 
-            # Log summaries run on the evaluation/validation data
-            sess.run(update_metrics_a, feed_dict={
-                x: eval_data_a, y: eval_labels_a, domain: source_domain,
-                keep_prob: 1.0, training: False
-            })
-        except tf.errors.OutOfRangeError:
-            break
+                # Log summaries run on the evaluation/validation data
+                sess.run(update_metrics_a, feed_dict={
+                    x: eval_data_a, y: eval_labels_a, domain: source_domain,
+                    keep_prob: 1.0, training: False
+                })
+            except tf.errors.OutOfRangeError:
+                break
 
     # Domain B -- separate since very likely a different size
     examples = 0
-    while max_examples == 0 or examples < max_examples:
-        try:
-            # Get next evaluation batch
-            eval_data_b, eval_labels_b, eval_domains_b = sess.run([
-                next_data_batch_test_b, next_labels_batch_test_b,
-                next_domains_batch_test_b,
-            ])
+    if next_data_batch_test_b is not None and \
+        next_labels_batch_test_b is not None and \
+        next_domains_batch_test_b is not None:
+        while max_examples == 0 or examples < max_examples:
+            try:
+                # Get next evaluation batch
+                eval_data_b, eval_labels_b, eval_domains_b = sess.run([
+                    next_data_batch_test_b, next_labels_batch_test_b,
+                    next_domains_batch_test_b,
+                ])
 
-            # Make sure we don't go over the desired number of examples
-            # But, only if we don't want to evaluate all examples (i.e. if
-            # max_examples == 0)
-            if max_examples != 0:
-                diff = max_examples - examples
+                # Make sure we don't go over the desired number of examples
+                # But, only if we don't want to evaluate all examples (i.e. if
+                # max_examples == 0)
+                if max_examples != 0:
+                    diff = max_examples - examples
 
-                if examples + eval_data_b.shape[0] > max_examples:
-                    eval_data_b = eval_data_b[:diff]
-                    eval_labels_b = eval_labels_b[:diff]
+                    if examples + eval_data_b.shape[0] > max_examples:
+                        eval_data_b = eval_data_b[:diff]
+                        eval_labels_b = eval_labels_b[:diff]
 
-            examples += eval_data_b.shape[0]
+                examples += eval_data_b.shape[0]
 
-            if generalization:
-                target_domain = eval_domains_b
-            else:
-                # Match the number of examples we have
-                target_domain = domain_labels(1, eval_data_b.shape[0], num_domains)
+                if generalization:
+                    target_domain = eval_domains_b
+                else:
+                    # Match the number of examples we have
+                    target_domain = domain_labels(1, eval_data_b.shape[0], num_domains)
 
-            # Log summaries run on the evaluation/validation data
-            sess.run(update_metrics_b, feed_dict={
-                x: eval_data_b, y: eval_labels_b, domain: target_domain,
-                keep_prob: 1.0, training: False
-            })
-        except tf.errors.OutOfRangeError:
-            break
+                # Log summaries run on the evaluation/validation data
+                sess.run(update_metrics_b, feed_dict={
+                    x: eval_data_b, y: eval_labels_b, domain: target_domain,
+                    keep_prob: 1.0, training: False
+                })
+            except tf.errors.OutOfRangeError:
+                break
 
 def evaluation_plots(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -143,6 +149,11 @@ def evaluation_plots(sess,
     generate and return the PCA and t-SNE plots. Optionally, save these to a file
     as well.
     """
+    # Skip if we don't have all domain A and B data
+    if next_data_batch_test_a is None or next_labels_batch_test_a is None or \
+        next_data_batch_test_b is None or next_labels_batch_test_b is None:
+        return None
+
     # Get the first batch of evaluation data to use for these plots
     eval_input_hook_a.iter_init_func(sess)
     eval_input_hook_b.iter_init_func(sess)
@@ -640,13 +651,21 @@ def train(
             step = sess.run(inc_global_step)
 
             # Get data for this iteration
-            data_batch_a, labels_batch_a, domains_batch_a, \
-            data_batch_b, labels_batch_b, domains_batch_b = sess.run([
-                next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
-                next_data_batch_b, next_labels_batch_b, next_domains_batch_b,
-            ])
+            if next_data_batch_b is not None:
+                data_batch_a, labels_batch_a, domains_batch_a, \
+                data_batch_b, labels_batch_b, domains_batch_b = sess.run([
+                    next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
+                    next_data_batch_b, next_labels_batch_b, next_domains_batch_b,
+                ])
+            else:
+                data_batch_a, labels_batch_a, domains_batch_a = sess.run([
+                    next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
+                ])
 
             if adaptation:
+                assert next_data_batch_b is not None, \
+                    "Cannot perform adaptation without a domain B dataset"
+
                 # Concatenate for adaptation - concatenate source labels with all-zero
                 # labels for target since we can't use the target labels during
                 # unsupervised domain adaptation
@@ -740,10 +759,14 @@ def train(
 
                 if generalization:
                     domains_a = domains_batch_a
-                    domains_b = domains_batch_b
+
+                    if next_data_batch_b is not None:
+                        domains_b = domains_batch_b
                 else:
                     domains_a = source_domain
-                    domains_b = target_domain
+
+                    if next_data_batch_b is not None:
+                        domains_b = target_domain
 
                 # Log summaries run on the training data
                 #
@@ -757,13 +780,14 @@ def train(
                 summ = sess.run(training_summaries_a, feed_dict=feed_dict)
                 writer.add_summary(summ, step)
 
-                feed_dict = {
-                    x: data_batch_b, y: labels_batch_b, domain: domains_b,
-                    keep_prob: 1.0, training: False
-                }
-                sess.run(update_metrics_b, feed_dict=feed_dict)
-                summ = sess.run(training_summaries_b, feed_dict=feed_dict)
-                writer.add_summary(summ, step)
+                if next_data_batch_b is not None:
+                    feed_dict = {
+                        x: data_batch_b, y: labels_batch_b, domain: domains_b,
+                        keep_prob: 1.0, training: False
+                    }
+                    sess.run(update_metrics_b, feed_dict=feed_dict)
+                    summ = sess.run(training_summaries_b, feed_dict=feed_dict)
+                    writer.add_summary(summ, step)
 
                 t = time.time() - t
 
@@ -793,7 +817,9 @@ def train(
                 summs_a, summs_b = sess.run([
                     validation_summaries_a, validation_summaries_b])
                 writer.add_summary(summs_a, step)
-                writer.add_summary(summs_b, step)
+
+                if next_data_batch_b is not None:
+                    writer.add_summary(summs_b, step)
 
                 t = time.time() - t
 
@@ -839,12 +865,13 @@ def train(
                     extra_model_outputs, num_features, first_step, config,
                     max_plot_examples)
 
-                for name, buf in plots:
-                    # See: https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
-                    plot = tf.Summary.Image(encoded_image_string=buf)
-                    summ = tf.Summary(value=[tf.Summary.Value(
-                        tag=name, image=plot)])
-                    writer.add_summary(summ, step)
+                if plots is not None:
+                    for name, buf in plots:
+                        # See: https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
+                        plot = tf.Summary.Image(encoded_image_string=buf)
+                        summ = tf.Summary(value=[tf.Summary.Value(
+                            tag=name, image=plot)])
+                        writer.add_summary(summ, step)
 
                 t = time.time() - t
 
@@ -887,8 +914,8 @@ if __name__ == '__main__':
         help="Use flat model, i.e. only flatten input fed to feature extractor")
     parser.add_argument('--fold', default=0, type=int,
         help="What fold to use from the dataset files (default fold 0)")
-    parser.add_argument('--target', default="hh101", type=str,
-        help="What dataset to use as the target (default \"hh101\")")
+    parser.add_argument('--target', default="", type=str,
+        help="What dataset to use as the target (default none, i.e. blank)")
     parser.add_argument('--features', default="al", type=str,
         help="Whether to use \"al\", \"simple\", or \"simple2\" features (default \"al\")")
     parser.add_argument('--units', default=50, type=int,

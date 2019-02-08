@@ -213,6 +213,11 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes, num_domai
         return x, y, domain
 
     def input_fn():
+        # Ignore if no data
+        if len(filenames) == 0:
+            iter_init_hook.iter_init_func = lambda *args: None
+            return None, None, None
+
         # Interleave the tfrecord files
         files = tf.data.Dataset.from_tensor_slices(filenames)
         dataset = files.interleave(
@@ -449,10 +454,11 @@ def get_tfrecord_traintest_datasets(feature_set, target, fold, dataset, sample, 
 
         tfrecords_a.append(f)
 
-    # Target
-    assert target_file is not None, \
-        "Did not find target "+target+" fold "+str(fold)
-    tfrecords_b.append(target_file)
+    # Target -- require it unless it's blank, i.e. we don't want a target
+    if target != "":
+        assert target_file is not None, \
+            "Did not find target "+target+" fold "+str(fold)
+        tfrecords_b.append(target_file)
 
     return tfrecords_a, tfrecords_b
 

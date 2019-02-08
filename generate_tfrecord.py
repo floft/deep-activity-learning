@@ -128,6 +128,28 @@ def process_fold(filename, fold, name, domain, num_domains, num_classes, outputs
     train_data, train_labels = one_hot(train_data, train_labels, num_classes, index_one)
     train_domains = domain_labels(domain, len(train_labels), num_domains)
 
+    # For time-series validation split, we have to split before shuffling
+    if separate_valid and timesplit_valid:
+        # Get the indices for the folds based on a time-series split
+        train_indices, test_indices = cross_validation_indices(valid_folds, train_data)
+
+        # Take the last fold, i.e. all the data is either in train or valid.
+        train_indices = train_indices[-1]
+        test_indices = test_indices[-1]
+
+        valid_data = train_data[test_indices]
+        valid_labels = train_labels[test_indices]
+        valid_domains = train_domains[test_indices]
+        train_data = train_data[train_indices]
+        train_labels = train_labels[train_indices]
+        train_domains = train_domains[train_indices]
+
+        # Shuffle validation data
+        p = shuffle_together_calc(len(valid_labels), seed=seed+2)
+        valid_data = valid_data[p]
+        valid_labels = valid_labels[p]
+        valid_domains = valid_domains[p]
+
     p = shuffle_together_calc(len(train_labels), seed=seed)
     train_data = train_data[p]
     train_labels = train_labels[p]
@@ -141,31 +163,16 @@ def process_fold(filename, fold, name, domain, num_domains, num_classes, outputs
         norms = calculate_normalization_meanstd(train_data)
         train_data = apply_normalization_meanstd(train_data, norms)
 
-    # Split out valid data
-    if separate_valid:
-        if timesplit_valid:
-            # Get the indices for the folds based on a time-series split
-            train_indices, test_indices = cross_validation_indices(valid_folds, train_data)
+    # Split out valid data (non-time-split we'll do it after shuffle)
+    if separate_valid and not timesplit_valid:
+        training_end = math.ceil((1-valid_amount)*len(train_data))
 
-            # Take the last fold, i.e. all the data is either in train or valid.
-            train_indices = train_indices[-1]
-            test_indices = test_indices[-1]
-
-            valid_data = train_data[test_indices]
-            valid_labels = train_labels[test_indices]
-            valid_domains = train_domains[test_indices]
-            train_data = train_data[train_indices]
-            train_labels = train_labels[train_indices]
-            train_domains = train_domains[train_indices]
-        else:
-            training_end = math.ceil((1-valid_amount)*len(train_data))
-
-            valid_data = train_data[training_end:]
-            valid_labels = train_labels[training_end:]
-            valid_domains = train_domains[training_end:]
-            train_data = train_data[:training_end]
-            train_labels = train_labels[:training_end]
-            train_domains = train_domains[:training_end]
+        valid_data = train_data[training_end:]
+        valid_labels = train_labels[training_end:]
+        valid_domains = train_domains[training_end:]
+        train_data = train_data[:training_end]
+        train_labels = train_labels[:training_end]
+        train_domains = train_domains[:training_end]
 
     if sample:
         train_data = train_data[:2000]
@@ -268,7 +275,7 @@ def generate_tfrecords(inputs="preprocessing/windows",
         for fold in get_keys(f):
             commands.append((f, fold, name, domain, num_domains, num_classes,
                 outputs, seed))
-            seed += 2
+            seed += 3
 
     # Process them all
     run_job_pool(process_fold, commands, desc=prefix)

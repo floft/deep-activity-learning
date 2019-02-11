@@ -64,6 +64,11 @@ def parse_file(filename):
             elif len(l) > 0:
                 values = l.split(",")
 
+                # For example, if we ran evaluation before we had any models to
+                # evaluate, we'd get no data.
+                if values[0] == "No data.":
+                    return None
+
                 if in_validation:
                     validation.append((values[0], int(values[1]),
                         values[2], int(values[3]), float(values[4])))
@@ -128,7 +133,13 @@ def all_stats(files, recompute_averages=False, sort_on_test=False, sort_on_b=Fal
     stats = []
 
     for name, file in files:
-        validation, traintest, averages = parse_file(file)
+        parse_result = parse_file(file)
+
+        if parse_result is None:
+            print("Warning: skipping", file)
+            continue
+
+        validation, traintest, averages = parse_result
 
         if recompute_averages:
             averages = compute_eval_stats(traintest)
@@ -234,7 +245,8 @@ if __name__ == "__main__":
         best_params["balance"],
         best_params["units"],
         best_params["layers"],
-        best_params["dropout"]
+        best_params["dropout"],
+        test=True
     )
     print(command[0])
     print(command[1])

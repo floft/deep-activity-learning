@@ -81,6 +81,10 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
     # Unless, we want the last one, then just get that one.
     max_accuracy_step, max_accuracy = get_step_from_log(log_dir, last)
 
+    # If no log file.... give up
+    if max_accuracy_step is None:
+        return target, fold, None, None, None, None
+
     # Get checkpoint file
     ckpt, max_accuracy_step = get_checkpoint(model_dir, max_accuracy_step)
 
@@ -334,14 +338,16 @@ if __name__ == '__main__':
 
     print("Target,Fold,Train A,Test A,Train B,Test B")
     for target, fold, s_train, t_train, s_test, t_test in results:
-        print(target+","+str(fold)+","+ \
-            str(s_train)+","+str(s_test)+","+ \
-            str(t_train)+","+str(t_test))
+        if s_train is not None and t_train is not None \
+            and s_test is not None and t_test is not None:
+            print(target+","+str(fold)+","+ \
+                str(s_train)+","+str(s_test)+","+ \
+                str(t_train)+","+str(t_test))
 
-        source_train.append(s_train)
-        source_test.append(s_test)
-        target_train.append(t_train)
-        target_test.append(t_test)
+            source_train.append(s_train)
+            source_test.append(s_test)
+            target_train.append(t_train)
+            target_test.append(t_test)
 
     source_train = np.array(source_train)
     source_test = np.array(source_test)

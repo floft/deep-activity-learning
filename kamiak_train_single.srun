@@ -64,6 +64,12 @@ handle_terminate() {
     exit 1
 }
 
+handle_error() {
+    echo "Error occured -- exiting"
+    cleanup
+    exit 1
+}
+
 # Remove workspace at the end, end all remaining processes
 cleanup() {
     rmworkspace -a -f --name="$SCRATCHDIR"
@@ -106,9 +112,8 @@ echo "Training network: started"
 mkdir -p "$data/$logFolder/" # log dir, rsync this to view with TensorBoard
 
 python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
-    --gpu-mem=0.9 "${program_args[@]}"
+    --gpu-mem=0.9 "${program_args[@]}" || handle_error
 
-wait
 echo "Training network: done"
 
 # Cleanup

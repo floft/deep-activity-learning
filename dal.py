@@ -976,6 +976,9 @@ if __name__ == '__main__':
         bidirectional=False, feature_extractor=True, debug=False)
     args = parser.parse_args()
 
+    # TensorFlow will error if this happens
+    assert args.dropout != 0, "dropout cannot be zero"
+
     # Load datasets
     al_config = ALConfig()
     tfrecord_config = TFRecordConfig(args.features)

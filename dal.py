@@ -513,8 +513,9 @@ def train(
             next_domains_batch_test_b = eval_input_fn_b()
 
     # Above we needed to load with the right number of num_domains, but for
-    # adaptation, we only want two: source and target
-    if adaptation:
+    # adaptation, we only want two: source and target. Default for any
+    # non-generalization to also use two since the resulting network is smaller.
+    if not generalization:
         num_domains = 2
 
     # Inputs

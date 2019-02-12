@@ -118,7 +118,7 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
 
     # Above we needed to load with the right number of num_domains, but for
     # adaptation, we only want two: source and target
-    if adaptation:
+    if not generalization:
         num_domains = 2
 
     # Only build graph in this process if we're the first run, i.e. if the graph

@@ -23,7 +23,9 @@ from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat, \
 from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
     domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
     calc_class_weights
-from eval_utils import last_modified_number, get_files_to_keep, delete_models_except
+from eval_utils import last_modified_number, get_files_to_keep, \
+    get_step_from_log, delete_models_except, get_best_valid_accuracy, \
+    write_best_valid_accuracy
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -441,6 +443,26 @@ class RemoveOldCheckpointSaverListener(tf.train.CheckpointSaverListener):
         # still training and the file isn't complete yet.
         best, last = get_files_to_keep(self.log_dir, warn=False)
         delete_models_except(self.model_dir, best, last)
+
+    def after_save(self, session, global_step_value):
+        """
+        Keep track of the best accuracy we've gotten on the validation data.
+        This file is used for automated hyperparameter tuning.
+
+        This is done after saving since possibly the latest checkpoint had the
+        highest validation accuracy.
+        """
+        # Get previous best if available
+        previous_best = get_best_valid_accuracy(self.log_dir)
+
+        # Get new best
+        _, best_accuracy = get_step_from_log(self.log_dir, last=False, warn=False)
+
+        # Only if we got some accuracy (e.g. log might not exist)
+        if best_accuracy is not None:
+            # Write if new best is better than previous best
+            if previous_best is None or best_accuracy > previous_best:
+                write_best_valid_accuracy(self.log_dir, best_accuracy)
 
 def train(
         num_features, num_classes, num_domains, x_dims,

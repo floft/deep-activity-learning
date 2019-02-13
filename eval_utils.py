@@ -41,6 +41,14 @@ def last_modified(dir_name, glob):
 
 def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
         warn=True):
+    """
+    Get the highest accuracy and the step of that highest accuracy from the
+    latest log file in the specified log_dir. If last==True, then get the last
+    accuracy rather than the highest.
+
+    Optionally warn if the file is still being written to (i.e. training is
+    still running).
+    """
     # Open the log file generated during training, find the step with the
     # highest validation accuracy
     logfile = last_modified(log_dir, "*.tfevents*")
@@ -101,13 +109,39 @@ def get_checkpoint(model_dir, step):
 
     return ckpt, step
 
+def get_best_valid_accuracy(log_dir):
+    """
+    Read in the best validation accuracy from the best_valid_accuracy.txt file
+    in the log_dir, if it exists. If it doesn't, return None.
+    """
+    filename = os.path.join(log_dir, "best_valid_accuracy.txt")
+
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
+            for line in f:
+                try:
+                    return float(line)
+                except ValueError:
+                    pass
+
+    return None
+
+def write_best_valid_accuracy(log_dir, accuracy):
+    """ Write the best validation accuracy to a file """
+    filename = os.path.join(log_dir, "best_valid_accuracy.txt")
+
+    with open(filename, "w") as f:
+        f.write(str(accuracy))
+
 def get_files_to_keep(log_dir, warn=True):
+    """ Get both the best and last model files to keep """
     best, _ = get_step_from_log(log_dir, last=False, warn=warn)
     last, _ = get_step_from_log(log_dir, last=True, warn=warn)
 
     return best, last
 
 def delete_models_except(model_dir, best, last):
+    """ Delete all the model files except for the specified best and last ones """
     # Skip deleting files if we couldn't find the best/last, i.e. error on the
     # side of not deleting stuff.
     if best is None or last is None:

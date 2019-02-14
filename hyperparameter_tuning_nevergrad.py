@@ -16,6 +16,8 @@ import random
 import subprocess
 import numpy as np
 import nevergrad.optimization as optimization
+
+from datetime import datetime
 from nevergrad import instrumentation as inst
 
 from file_utils import get_num_finished, get_average_valid_accuracy, get_last_int
@@ -131,8 +133,8 @@ def make_instrumentation(debug=False):
 
     return instrum
 
-def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
-        num_workers=10, pickle_file="nevergrad_optim.pickle", print_result=True):
+def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
+        num_workers=7, pickle_file="nevergrad_optim.pickle", print_result=True):
     """
     Run hyperparameter tuning
     See: https://github.com/facebookresearch/nevergrad/blob/master/docs/machinelearning.md
@@ -144,6 +146,7 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
     instrum = make_instrumentation()
 
     # Optimization -- load if it exists, otherwise create it
+    # See: https://github.com/facebookresearch/nevergrad/issues/49
     data = load_pickle(pickle_file)
 
     if data is not None:
@@ -164,6 +167,10 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
     # Exit gracefully, cancelling all the training jobs
     killer = GracefulKiller()
 
+    # We can run at most for 7 days
+    started = datetime.now()
+    time_expired = False
+
     # Run optimization
     while not killer.kill_now and (jobs < budget or len(running) > 0):
         # If any are done, tell the result and remove it
@@ -173,7 +180,8 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
 
                 if result is not None:
                     optim.tell(n.params, result)
-                    print("Result:", n.name, result, file=sys.stderr)
+                    print("Result:", n.name, result,
+                        "("+str(budget-jobs)+" jobs left)", file=sys.stderr)
                 else:
                     print("Warning:", n.name, "result is None",
                         file=sys.stderr)
@@ -181,7 +189,7 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
                 running.remove(n)
 
         # If we don't have enough running jobs, start more
-        while jobs < budget and len(running) < num_workers:
+        while not time_expired and jobs < budget and len(running) < num_workers:
             # New network to train
             n = Network(instrum, optim.ask())
 
@@ -199,6 +207,18 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
         # Wait a bit before checking again (the jobs take on the order
         # of hours)
         time.sleep(5)
+
+        # Determine if we should stop queueing jobs since we're running out of
+        # time to continue training. Max runtime is 7 days, so stop queueing jobs
+        # 5 hours prior (i.e. 6 days 24 hours - 5 hours = 6 days 19 hours)
+        time_diff = datetime.now() - started
+
+        if time_diff.days > 6 and time_diff.seconds > 68400:
+            time_expired = True
+
+        # Quit if none running and the time has expired
+        if time_expired and len(running) == 0:
+            break
 
         # Try to keep relatively real-time for debugging
         sys.stdout.flush()

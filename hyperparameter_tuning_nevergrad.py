@@ -255,7 +255,6 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
         # Dynamically change how many jobs we run -- we'd like only a few to be
         # pending at a time
         pending = num_pending()
-        changed = False
 
         # Increase till we have some pending
         if pending == 0:
@@ -266,10 +265,6 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
         elif pending > 3 and num_workers > 1:
             num_workers -= 1
             changed = True
-
-        if changed:
-            print("Pending:", pending, "new num_workers:", num_workers,
-                file=sys.stderr)
 
         # Try to keep relatively real-time for debugging
         sys.stdout.flush()

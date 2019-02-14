@@ -426,21 +426,31 @@ def opt_with_summ(optimizer, loss, var_list=None):
 class RemoveOldCheckpointSaverListener(tf.train.CheckpointSaverListener):
     """
     Remove checkpoints that are not the best or the last one so we don't waste
-    tons of disk space. Also, keep track of best accuracy we've gotten so far.
+    tons of disk space
     """
     def __init__(self, log_dir, model_dir):
         self.log_dir = log_dir
         self.model_dir = model_dir
         super().__init__()
 
+    def before_save(self, session, global_step_value):
+        """
+        Do this right before saving, to make sure we don't mistakingly delete
+        the one we just saved in after_save. This will in effect keep the last
+        two instead of just the last one.
+        """
+        # Don't warn since we know there will be a DataLossError since we're
+        # still training and the file isn't complete yet.
+        best, last = get_files_to_keep(self.log_dir, warn=False)
+        delete_models_except(self.model_dir, best, last)
+
     def after_save(self, session, global_step_value):
         """
         Keep track of the best accuracy we've gotten on the validation data.
-        This file is used for automated hyperparameter tuning. This is done
-        after saving since possibly the latest checkpoint had the highest
-        validation accuracy.
+        This file is used for automated hyperparameter tuning.
 
-        Also, delete all the unneeded models, i.e. anything but the best or last.
+        This is done after saving since possibly the latest checkpoint had the
+        highest validation accuracy.
         """
         # Get previous best if available
         previous_best = get_best_valid_accuracy(self.log_dir)
@@ -453,11 +463,6 @@ class RemoveOldCheckpointSaverListener(tf.train.CheckpointSaverListener):
             # Write if new best is better than previous best
             if previous_best is None or best_accuracy > previous_best:
                 write_best_valid_accuracy(self.log_dir, best_accuracy)
-
-        # Don't warn since we know there will be a DataLossError since we're
-        # still training and the file isn't complete yet.
-        best, last = get_files_to_keep(self.log_dir, warn=False)
-        delete_models_except(self.model_dir, best, last)
 
 def train(
         num_features, num_classes, num_domains, x_dims,

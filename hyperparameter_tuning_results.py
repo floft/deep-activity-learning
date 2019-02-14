@@ -248,5 +248,5 @@ if __name__ == "__main__":
         best_params["dropout"],
         test=True
     )
-    print(command[0])
     print(command[1])
+    print(command[2])

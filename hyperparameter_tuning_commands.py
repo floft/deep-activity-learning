@@ -19,7 +19,7 @@ def generate_values(N):
     evals = []
 
     for i in range(N):
-        train, evaluate = output_command(batch[i], lr[i], balance[i], units[i],
+        _, train, evaluate = output_command(batch[i], lr[i], balance[i], units[i],
             layers[i], dropout[i])
         trains.append(train)
         evals.append(evaluate)
@@ -64,7 +64,7 @@ def output_command(batch, lr, balance, units, layers, dropout, test=False):
     train = "./kamiak_queue_all_folds.sh " + name + " " + train_args
     evaluate = "sbatch kamiak_eval.srun " + name + " " + eval_args
 
-    return train, evaluate
+    return name, train, evaluate
 
 if __name__ == "__main__":
     # Make repeatable

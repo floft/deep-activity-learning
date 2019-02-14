@@ -7,6 +7,22 @@ import sys
 import pathlib
 import tensorflow as tf
 
+def get_last_int(s, only_one=False):
+    """
+    Get last integer in a string
+
+    If only_one==True, then assert there's only one number
+    """
+    regex = re.compile(r'\d+')
+    numbers = [int(x) for x in regex.findall(s)]
+    last = numbers[-1]
+
+    if only_one:
+        assert len(numbers) == 1, \
+            "Could not determine number from last modified file"
+
+    return last
+
 def last_modified_number(dir_name, glob):
     """
     Looks in dir_name at all files matching glob and takes number
@@ -17,12 +33,7 @@ def last_modified_number(dir_name, glob):
 
     if len(files) > 0:
         # Get number from filename
-        regex = re.compile(r'\d+')
-        numbers = [int(x) for x in regex.findall(str(files[-1]))]
-        assert len(numbers) == 1, "Could not determine number from last modified file"
-        last = numbers[0]
-
-        return last
+        return get_last_int(str(files[-1]), only_one=True)
 
     return None
 
@@ -132,6 +143,18 @@ def write_best_valid_accuracy(log_dir, accuracy):
 
     with open(filename, "w") as f:
         f.write(str(accuracy))
+
+def get_finished(log_dir):
+    """ Does the file indicating completion exist? """
+    filename = os.path.join(log_dir, "finished.txt")
+    return os.path.exists(filename)
+
+def write_finished(log_dir):
+    """ Write the file indicating completion """
+    filename = os.path.join(log_dir, "finished.txt")
+
+    with open(filename, "w") as f:
+        f.write("\n")
 
 def get_files_to_keep(log_dir, warn=True):
     """ Get both the best and last model files to keep """

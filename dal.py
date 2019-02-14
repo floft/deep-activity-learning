@@ -25,7 +25,7 @@ from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
     calc_class_weights
 from eval_utils import last_modified_number, get_files_to_keep, \
     get_step_from_log, delete_models_except, get_best_valid_accuracy, \
-    write_best_valid_accuracy
+    write_best_valid_accuracy, write_finished
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -910,6 +910,9 @@ def train(
                 writer.flush()
 
         writer.flush()
+
+    # We're done -- used for hyperparameter tuning
+    write_finished(log_dir)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -98,6 +98,23 @@ class GracefulKiller:
         print("Exiting gracefully", file=sys.stderr)
         self.kill_now = True
 
+def num_pending(status="pending", username="garrett.wilson"):
+    """ Get the number of pending slurm jobs on a user's account """
+    cmd = [
+        "squeue",
+        "-u", username,
+        "-t", status,
+        "-h"
+    ]
+
+    output = subprocess.check_output(cmd)
+    output = output.decode("utf-8").strip()
+
+    if output == "":
+        return 0
+
+    return len(output.split("\n"))
+
 def make_repeatable():
     """ Set random seeds for making this more repeatable """
     random.seed(1234)
@@ -133,8 +150,20 @@ def make_instrumentation(debug=False):
 
     return instrum
 
+def tell_optim(optim, n, jobs_left):
+    """ Tell the optimizer the result of a trained network """
+    result = n.result()
+
+    if result is not None:
+        optim.tell(n.params, result)
+        print("Result:", n.name, result,
+            "("+str(jobs_left)+" jobs left)", file=sys.stderr)
+    else:
+        print("Warning:", n.name, "result is None",
+            file=sys.stderr)
+
 def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
-        num_workers=7, pickle_file="nevergrad_optim.pickle", print_result=True):
+        num_workers=6, pickle_file="nevergrad_optim.pickle"):
     """
     Run hyperparameter tuning
     See: https://github.com/facebookresearch/nevergrad/blob/master/docs/machinelearning.md
@@ -142,6 +171,11 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
     Note: num_workers is the number of sets of hyperparameters being tuned at a
     time, but the total number of jobs running at a time will be num_workers*3
     since it does 3-fold cross validation.
+
+    It is dynamically updated, so probably set it a bit lower than you want it.
+    It'll keep increasing it till there is at least one job always pending.
+    But, set it to approximately the number you expect since it might be used
+    in the optimization algorithm.
     """
     instrum = make_instrumentation()
 
@@ -176,16 +210,7 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
         # If any are done, tell the result and remove it
         for n in running:
             if n.finished():
-                result = n.result()
-
-                if result is not None:
-                    optim.tell(n.params, result)
-                    print("Result:", n.name, result,
-                        "("+str(budget-jobs)+" jobs left)", file=sys.stderr)
-                else:
-                    print("Warning:", n.name, "result is None",
-                        file=sys.stderr)
-
+                tell_optim(optim, n, budget-jobs)
                 running.remove(n)
 
         # If we don't have enough running jobs, start more
@@ -193,13 +218,14 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
             # New network to train
             n = Network(instrum, optim.ask())
 
+            # Skip if already done (tell though), otherwise start it
             if n.finished():
                 print("Already done:", n.name, file=sys.stderr)
+                tell_optim(optim, n, budget-jobs)
             else:
                 print("Starting:", n.name, file=sys.stderr)
                 n.start()
-
-            running.append(n)
+                running.append(n)
 
             # We've just added another job
             jobs += 1
@@ -214,11 +240,31 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
         time_diff = datetime.now() - started
 
         if time_diff.days > 6 and time_diff.seconds > 68400:
+            print("Time expired", file=sys.stderr)
             time_expired = True
 
         # Quit if none running and the time has expired
         if time_expired and len(running) == 0:
             break
+
+        # Dynamically change how many jobs we run -- we'd like only a few to be
+        # pending at a time
+        pending = num_pending()
+        changed = False
+
+        # Increase till we have some pending
+        if pending == 0:
+            num_workers += 1
+            changed = True
+        # Decrease if we have many pending but with the caveat that it takes
+        # a bit of time to get them started, so make sure we never go below 1
+        elif pending > 3 and num_workers > 1:
+            num_workers -= 1
+            changed = True
+
+        if changed:
+            print("Pending:", pending, "new num_workers:", num_workers,
+                file=sys.stderr)
 
         # Try to keep relatively real-time for debugging
         sys.stdout.flush()

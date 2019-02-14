@@ -208,7 +208,12 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
     # Run optimization
     while not killer.kill_now and (jobs < budget or len(running) > 0):
         # If any are done, tell the result and remove it
-        for n in running:
+        #
+        # Have to copy since we're removing items from what we're iterating over
+        # https://stackoverflow.com/a/5401723/2698494
+        running_orig = list(running)
+
+        for n in running_orig:
             if n.finished():
                 tell_optim(optim, n, budget-jobs)
                 running.remove(n)

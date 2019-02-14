@@ -2,53 +2,11 @@
 Functions for handling logs/models to help with evaluation
 """
 import os
-import re
 import sys
 import pathlib
 import tensorflow as tf
 
-def get_last_int(s, only_one=False):
-    """
-    Get last integer in a string
-
-    If only_one==True, then assert there's only one number
-    """
-    regex = re.compile(r'\d+')
-    numbers = [int(x) for x in regex.findall(s)]
-    last = numbers[-1]
-
-    if only_one:
-        assert len(numbers) == 1, \
-            "Could not determine number from last modified file"
-
-    return last
-
-def last_modified_number(dir_name, glob):
-    """
-    Looks in dir_name at all files matching glob and takes number
-    from the one last modified
-    """
-    files = pathlib.Path(dir_name).glob(glob)
-    files = sorted(files, key=lambda cp:cp.stat().st_mtime)
-
-    if len(files) > 0:
-        # Get number from filename
-        return get_last_int(str(files[-1]), only_one=True)
-
-    return None
-
-def last_modified(dir_name, glob):
-    """
-    Looks in dir_name at all files matching glob and returns the file last
-    modified
-    """
-    files = pathlib.Path(dir_name).glob(glob)
-    files = sorted(files, key=lambda cp:cp.stat().st_mtime)
-
-    if len(files) > 0:
-        return str(files[-1])
-
-    return None
+from file_utils import last_modified
 
 def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
         warn=True):
@@ -119,42 +77,6 @@ def get_checkpoint(model_dir, step):
             "could not find model checkpoint "+ckpt
 
     return ckpt, step
-
-def get_best_valid_accuracy(log_dir):
-    """
-    Read in the best validation accuracy from the best_valid_accuracy.txt file
-    in the log_dir, if it exists. If it doesn't, return None.
-    """
-    filename = os.path.join(log_dir, "best_valid_accuracy.txt")
-
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
-            for line in f:
-                try:
-                    return float(line)
-                except ValueError:
-                    pass
-
-    return None
-
-def write_best_valid_accuracy(log_dir, accuracy):
-    """ Write the best validation accuracy to a file """
-    filename = os.path.join(log_dir, "best_valid_accuracy.txt")
-
-    with open(filename, "w") as f:
-        f.write(str(accuracy))
-
-def get_finished(log_dir):
-    """ Does the file indicating completion exist? """
-    filename = os.path.join(log_dir, "finished.txt")
-    return os.path.exists(filename)
-
-def write_finished(log_dir):
-    """ Write the file indicating completion """
-    filename = os.path.join(log_dir, "finished.txt")
-
-    with open(filename, "w") as f:
-        f.write("\n")
 
 def get_files_to_keep(log_dir, warn=True):
     """ Get both the best and last model files to keep """

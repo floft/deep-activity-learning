@@ -23,8 +23,8 @@ from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat, \
 from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
     domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
     calc_class_weights
-from eval_utils import last_modified_number, get_files_to_keep, \
-    get_step_from_log, delete_models_except, get_best_valid_accuracy, \
+from eval_utils import get_files_to_keep, get_step_from_log, delete_models_except
+from file_utils import last_modified_number, get_best_valid_accuracy, \
     write_best_valid_accuracy, write_finished
 
 def update_metrics_on_val(sess,

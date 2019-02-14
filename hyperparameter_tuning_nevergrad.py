@@ -11,135 +11,90 @@ To install (see https://github.com/facebookresearch/nevergrad):
 import os
 import sys
 import time
+import signal
 import random
 import subprocess
 import numpy as np
 import nevergrad.optimization as optimization
 from nevergrad import instrumentation as inst
 
-from eval_utils import get_finished, get_best_valid_accuracy, get_last_int
+from file_utils import get_num_finished, get_average_valid_accuracy, get_last_int
 from pickle_data import load_pickle, save_pickle
 from hyperparameter_tuning_commands import output_command
 
 class Network:
     """
-    Run the neural net and return 1 - highest validation accuracy
-    Note: this assumes that rsync is running in the background, see Sync()
+    Run the neural net and return (1 - highest validation accuracy)
+
+    Note: this assumes it's running on the same filesystem as training (and in
+    the same directory) since it watches for files in the training log directory.
     """
-    def __init__(self, directory, instrum, params):
+    def __init__(self, instrum, params):
         args, _ = instrum.data_to_arguments(params, deterministic=True)
-        self.directory = directory
         self.instrum = instrum
         self.params = params
         self.args = args
-        self.exiting = False
-        self.log_dir = None
         self.jobs = [] # slurm job IDs
 
-    def ssh_command(self, command):
-        """ Get the command for running something over SSH """
-        return [
-            "ssh", "kamiak",
-            "cd "+self.directory+"; "+command
-        ]
+        # What command we'll run
+        name, train_command, _ = output_command(*args)
+        self.name = name
+        self.train_command = train_command
+
+        # Where the log files will be stored (synced with rsync, see Sync())
+        # Warning: must be set to the same as in kamiak_config.sh
+        self.log_dir = "kamiak-logs-" + name
+
+        # The start script creates 3 separate jobs, so once we have 3 "finished"
+        # files we're done.
+        self.num_folds = 3
 
     def start(self):
         """ Start the training by submitting to the queue """
-        # Figure out what neural network command to run
-        name, train_command, _ = output_command(*self.args)
-
-        # Run the command on Kamiak via ssh
-        cmd = self.ssh_command(train_command)
-
         # Get the response to know what job number these are
-        output = subprocess.check_output(cmd).decode("utf-8")
+        cmd = self.train_command.split(" ")
+        output = subprocess.check_output(cmd)
+        output = output.decode("utf-8").strip().split("\n")
 
         for line in output:
             self.jobs.append(get_last_int(line))
 
-        # Where the log files will be stored (synced with rsync, see Sync())
-        self.log_dir = "kamiak-logs-" + name
-
-    def run(self):
-        """ Wait for the results """
-        self.start()
-
-        while not self.exiting:
-            if self.finished():
-                return self.result()
-            else:
-                time.sleep(5)
-
-        return None
-
     def finished(self):
         """ Check if the file saying we're done exists """
-        if self.log_dir is not None:
-            return get_finished(self.log_dir)
-
-        return False
+        return get_num_finished(self.log_dir) == self.num_folds
 
     def result(self):
         """ Check the result in the best accuracy file """
-        if self.log_dir is not None:
-            best_accuracy = get_best_valid_accuracy(self.log_dir)
+        best_accuracy = get_average_valid_accuracy(self.log_dir)
 
-            if best_accuracy is not None:
-                return 1.0 - best_accuracy
+        if best_accuracy is not None:
+            # Nevergrad performs minimization, but we want to maximize
+            # the accuracy
+            return 1.0 - best_accuracy
 
         return None
 
     def stop(self):
-        """ Stop run() and cancel the slurm jobs """
-        # Exit the run() function
-        self.exiting = True
+        """ Cancel the slurm jobs """
+        if len(self.jobs) > 0:
+            cmd = ["scancel"]+[str(j) for j in self.jobs]
+            output = subprocess.check_output(cmd).decode("utf-8")
+            print(output, file=sys.stderr)
 
-        # Exit the jobs
-        cmd = self.ssh_command("scancel "+" ".join([str(j) for j in self.jobs]))
-        output = subprocess.check_output(cmd)
-        print(output, file=sys.stderr)
+class GracefulKiller:
+    """
+    Know when we want to exit gracefully
+    https://stackoverflow.com/a/31464349/2698494
+    """
+    kill_now = False
 
-class Sync:
-    """ Run rsync to sync the best_valid_accuracy.txt files """
-    def __init__(self, directory):
-        self.directory = directory
-        self.p = None
-        self.exiting = False
+    def __init__(self):
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-    def run(self):
-        """ Continuously run rsync """
-        while not self.exiting:
-            # Run rsync
-            self.start()
-
-            if self.p is not None:
-                self.p.wait()
-
-            # Wait and then we'll run it again
-            time.sleep(30)
-
-    def start(self):
-        """ Start rsync process """
-        if self.p is None:
-            cmd = [
-                "rsync", "-Pahuv",
-                "--include", "best_valid_accuracy.txt", # accuracy files
-                "--include", "finished.txt", # is it done
-                "--exclude", "*", # only included files
-                self.directory, # from
-                "./", # to
-            ]
-            print("Executing", cmd, file=sys.stderr)
-            self.p = subprocess.Popen(cmd)
-
-    def stop(self):
-        """ Stop run() and the rsync process """
-        self.exiting = True
-
-        if self.p is not None:
-            self.p.terminate()
-            self.p.wait()
-            self.p = None
+    def exit_gracefully(self, signum, frame):
+        print("Exiting gracefully", file=sys.stderr)
+        self.kill_now = True
 
 def make_repeatable():
     """ Set random seeds for making this more repeatable """
@@ -177,11 +132,14 @@ def make_instrumentation(debug=False):
     return instrum
 
 def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
-        num_workers=1, directory="/data/vcea/garrett.wilson/dal",
-        pickle_file="nevergrad_optim.pickle", print_result=True):
+        num_workers=10, pickle_file="nevergrad_optim.pickle", print_result=True):
     """
     Run hyperparameter tuning
     See: https://github.com/facebookresearch/nevergrad/blob/master/docs/machinelearning.md
+
+    Note: num_workers is the number of sets of hyperparameters being tuned at a
+    time, but the total number of jobs running at a time will be num_workers*3
+    since it does 3-fold cross validation.
     """
     instrum = make_instrumentation()
 
@@ -198,39 +156,73 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=40,
         optim = optimization.registry[tool](dimension=instrum.dimension,
             budget=budget, num_workers=num_workers)
 
-    s = Sync(directory)
+    # How many we've done (will stop after "budget" number of them) and the
+    # currently training networks
+    jobs = 0
+    running = []
 
-    try:
-        s.run()
-    except KeyboardInterrupt:
-        s.stop()
+    # Exit gracefully, cancelling all the training jobs
+    killer = GracefulKiller()
 
-    for _ in range(budget):
-        params = optim.ask()
+    # Run optimization
+    while not killer.kill_now and (jobs < budget or len(running) > 0):
+        # If any are done, tell the result and remove it
+        for n in running:
+            if n.finished():
+                result = n.result()
 
-        try:
-            n = Network(directory, instrum, params)
-            result = n.run()
-        except KeyboardInterrupt:
+                if result is not None:
+                    optim.tell(n.params, result)
+                    print("Result:", n.name, result, file=sys.stderr)
+                else:
+                    print("Warning:", n.name, "result is None",
+                        file=sys.stderr)
+
+                running.remove(n)
+
+        # If we don't have enough running jobs, start more
+        while jobs < budget and len(running) < num_workers:
+            # New network to train
+            n = Network(instrum, optim.ask())
+
+            if n.finished():
+                print("Already done:", n.name, file=sys.stderr)
+            else:
+                print("Starting:", n.name, file=sys.stderr)
+                n.start()
+
+            running.append(n)
+
+            # We've just added another job
+            jobs += 1
+
+        # Wait a bit before checking again (the jobs take on the order
+        # of hours)
+        time.sleep(5)
+
+        # Try to keep relatively real-time for debugging
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+    # Stop all jobs if killed
+    if killer.kill_now:
+        for n in running:
             n.stop()
-            break
 
-        if result is not None:
-            optim.tell(params, result)
-
-    # Save it
+    # Save present optimizer state and current recommendation
     recommendation = optim.provide_recommendation()
     save_pickle(pickle_file, (optim, recommendation), overwrite=True)
 
     # Get best recommended parameters
-    if print_result:
-        print("Recommendation")
-        print(get_summary(instrum, recommendation))
-        args, _ = instrum.data_to_arguments(recommendation, deterministic=True)
-        _, train, _ = output_command(*args)
-        print("Command:", train)
+    print("Recommendation")
+    print(get_summary(instrum, recommendation))
+    args, _ = instrum.data_to_arguments(recommendation, deterministic=True)
+    _, train, _ = output_command(*args)
+    print("Command:", train)
 
-    return args
+    # We want to exit 1 so we know it's failed to complete
+    if killer.kill_now:
+        sys.exit(1)
 
 if __name__ == "__main__":
     make_repeatable()

@@ -236,8 +236,9 @@ def hyperparameter_tuning(tool="PortfolioDiscreteOnePlusOne", budget=600,
             jobs += 1
 
         # Wait a bit before checking again (the jobs take on the order
-        # of hours)
-        time.sleep(5)
+        # of hours), but only if we're not supposed to exit
+        if not killer.kill_now:
+            time.sleep(5)
 
         # Determine if we should stop queueing jobs since we're running out of
         # time to continue training. Max runtime is 7 days, so stop queueing jobs

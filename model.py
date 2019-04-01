@@ -74,35 +74,47 @@ def classifier(net, layers, units, dropout, num_classes, name=None):
     net = tf.keras.layers.Activation("softmax", name=name)(net)
     return net
 
+class FlatModel(tf.keras.Model):
+    def __init__(self, input_shape, num_classes, num_domains):
+        super().__init__()
+
+        # Flatten and normalize
+        self.pre = tf.keras.Sequential([
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.BatchNormalization()
+        ])
+
+        # Feature extractor
+        self.fe = feature_extractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
+
+    def call(self, inputs, grl_lambda=1.0, training=None):
+        net = self.pre(inputs)
+        net = self.fe(net)
+
+        # Task classifier
+        task = classifier(net, FLAGS.task_layers, FLAGS.units, FLAGS.dropout,
+            num_classes, name="task_output")
+
+        # Domain classifier
+        #
+        # For generalization, we also pass in the task classifier output to the
+        # discriminator though forbid gradients from being passed through to
+        # the task classifier.
+        if FLAGS.generalization:
+            task_stop_gradient = StopGradient()(task)
+            domain = tf.keras.layers.Concatenate()([net, task_stop_gradient])
+        else:
+            domain = net
+
+        domain = FlipGradient()(domain)
+        domain = classifier(domain, FLAGS.domain_layers, FLAGS.units, FLAGS.dropout,
+            num_domains, name="domain_output")
+
 def make_flat(input_shape, num_classes, num_domains, grl_lambda):
     """ Flatten the input and pass directly to the feature extractor """
     inputs = tf.keras.layers.Input(input_shape)
 
-    # Flatten and normalize
-    net = tf.keras.layers.Flatten()(inputs)
-    net = tf.keras.layers.BatchNormalization()(net) # i.e. normalize inputs...
 
-    # Feature extractor
-    net = feature_extractor(net, FLAGS.layers, FLAGS.units, FLAGS.dropout)
-
-    # Task classifier
-    task = classifier(net, FLAGS.task_layers, FLAGS.units, FLAGS.dropout,
-        num_classes, name="task_output")
-
-    # Domain classifier
-    #
-    # For generalization, we also pass in the task classifier output to the
-    # discriminator though forbid gradients from being passed through to
-    # the task classifier.
-    if FLAGS.generalization:
-        task_stop_gradient = StopGradient()(task)
-        domain = tf.keras.layers.Concatenate()([net, task_stop_gradient])
-    else:
-        domain = net
-
-    domain = FlipGradient()(domain)
-    domain = classifier(domain, FLAGS.domain_layers, FLAGS.units, FLAGS.dropout,
-        num_domains, name="domain_output")
 
     return tf.keras.Model(inputs=inputs, outputs=[task,domain])
 

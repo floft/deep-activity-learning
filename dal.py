@@ -37,7 +37,7 @@ flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
 flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
 flags.DEFINE_boolean("adapt", False, "Perform domain adaptation on the model")
 flags.DEFINE_boolean("generalize", False, "Perform domain generalization on the model")
-flags.DEFINE_enum("model", None, ["lstm", "vrnn", "cnn", "resnet", "attention", "tcn", "flat"], "What model type to use")
+flags.DEFINE_enum("model", None, ["flat"], "What model type to use")
 flags.DEFINE_integer("fold", 0, "What fold to use from the dataset files")
 flags.DEFINE_string("target", "", "What dataset to use as the target (default none, i.e. blank)")
 flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
@@ -572,19 +572,7 @@ def train(
     source_domain = domain_labels(0, batch_size, num_domains)
     target_domain = domain_labels(1, batch_size, num_domains)
 
-    if FLAGS.model == "lstm":
-        model_func = build_lstm
-    elif FLAGS.model == "vrnn":
-        model_func = build_vrnn
-    elif FLAGS.model == "cnn":
-        model_func = build_cnn
-    elif FLAGS.model == "resnet":
-        model_func = build_resnet
-    elif FLAGS.model == "attention":
-        model_func = build_attention
-    elif FLAGS.model == "tcn":
-        model_func = build_tcn
-    elif FLAGS.model == "flat":
+    if FLAGS.model == "flat":
         model_func = build_flat
 
     # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn

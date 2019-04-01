@@ -13,7 +13,7 @@ import pandas as pd
 import tensorflow as tf
 
 # Not-so-pretty code to feed data to TensorFlow.
-class IteratorInitializerHook(tf.train.SessionRunHook):
+class IteratorInitializerHook(tf.estimator.SessionRunHook):
     """Hook to initialise data iterator after Session is created.
     https://medium.com/onfido-tech/higher-level-apis-in-tensorflow-67bfb602e6c0"""
     def __init__(self):
@@ -32,8 +32,8 @@ def _get_input_fn(features, labels, batch_size,
 
     def input_fn():
         # Input images using placeholders to reduce memory usage
-        features_placeholder = tf.placeholder(features.dtype, features.shape)
-        labels_placeholder = tf.placeholder(labels.dtype, labels.shape)
+        features_placeholder = tf.compat.v1.placeholder(features.dtype, features.shape)
+        labels_placeholder = tf.compat.v1.placeholder(labels.dtype, labels.shape)
         dataset = tf.data.Dataset.from_tensor_slices((features_placeholder, labels_placeholder))
 
         if evaluation:
@@ -47,7 +47,7 @@ def _get_input_fn(features, labels, batch_size,
         # See: https://www.tensorflow.org/guide/performance/datasets
         dataset = dataset.prefetch(prefetch_buffer_size)
 
-        iterator = dataset.make_initializable_iterator()
+        iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
         next_data_batch, next_label_batch = iterator.get_next()
 
         # Need to initialize iterator after creating a session in the estimator
@@ -78,7 +78,7 @@ def tf_random_ones(x, mask, start, end):
         sess = tf.Session()
         sess.run(x_augmented)
     """
-    num_rows = tf.shape(x)[0]
+    num_rows = tf.shape(input=x)[0]
     num_values = end - start
 
     # Zero the sensor values of those rows
@@ -92,19 +92,19 @@ def tf_random_ones(x, mask, start, end):
     # Put 1's somewhere back in the sensors (may or may not be the same sensor)
     #
     # Get the indices (still using the above mask) of where to set to 1's
-    mask_indices = tf.to_int32(tf.where(mask))
+    mask_indices = tf.cast(tf.where(mask), dtype=tf.int32)
     # Randomly pick between start:end where to put the 1
-    sensors = tf.random.uniform([tf.shape(mask_indices)[0]],
+    sensors = tf.random.uniform([tf.shape(input=mask_indices)[0]],
         minval=start, maxval=end, dtype=tf.int32)
     sensors = tf.expand_dims(sensors, axis=1)
     # To make this an index it needs to be, e.g. [[1,5],[2,6]], if we were
     # updating rows 1 and 2, where features 5 and 6 would be set to 1's
     set_to_one = tf.concat([mask_indices,sensors],axis=1)
     # Set those indices to ones
-    ones = tf.ones([tf.shape(set_to_one)[0]], tf.float32)
+    ones = tf.ones([tf.shape(input=set_to_one)[0]], tf.float32)
     # Idea from:
     # https://github.com/tensorflow/tensorflow/issues/2358#issuecomment-274590896
-    x = x + tf.scatter_nd(set_to_one, ones, tf.shape(x))
+    x = x + tf.scatter_nd(set_to_one, ones, tf.shape(input=x))
 
     return x
 
@@ -149,9 +149,9 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
             <0,0,0,1> - close
     """
     assert len(x.shape) == 3, "augmentation data shape: (examples, times, features)"
-    num_examples = tf.shape(x)[0]
-    num_time_steps = tf.shape(x)[1]
-    num_features = tf.shape(x)[2]
+    num_examples = tf.shape(input=x)[0]
+    num_time_steps = tf.shape(input=x)[1]
+    num_features = tf.shape(input=x)[2]
     num_time_features = 10
     num_values_features = 4
     num_sensors = num_features - num_time_features - num_values_features
@@ -193,15 +193,15 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes, num_domai
     # Create a description of the features
     # See: https://www.tensorflow.org/tutorials/load_data/tf-records
     feature_description = {
-        'x': tf.FixedLenFeature(x_dims, tf.float32),
-        'y': tf.FixedLenFeature([num_classes], tf.float32),
-        'domain': tf.FixedLenFeature([num_domains], tf.float32),
+        'x': tf.io.FixedLenFeature(x_dims, tf.float32),
+        'y': tf.io.FixedLenFeature([num_classes], tf.float32),
+        'domain': tf.io.FixedLenFeature([num_domains], tf.float32),
     }
 
     def _parse_function(example_proto):
         # Parse the input tf.Example proto using the dictionary above.
         # parse_single_example is without a batch, parse_example is with batches
-        parsed = tf.parse_example(example_proto, feature_description)
+        parsed = tf.io.parse_example(serialized=example_proto, features=feature_description)
         x = parsed["x"]
         y = parsed["y"]
         domain = parsed["domain"]
@@ -238,7 +238,7 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes, num_domai
         # See: https://www.tensorflow.org/guide/performance/datasets
         dataset = dataset.prefetch(prefetch_buffer_size)
 
-        iterator = dataset.make_initializable_iterator()
+        iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
         next_data_batch, next_label_batch, next_domain_batch = iterator.get_next()
 
         # Need to initialize iterator after creating a session in the estimator
@@ -487,7 +487,7 @@ def calc_class_weights(filenames, x_dims, num_classes, num_domains, balance_pow=
     counts = np.zeros((num_classes,), dtype=np.int32)
 
     # Increment total by number of examples in each batch
-    increment_total = tf.shape(next_labels_batch)[0]
+    increment_total = tf.shape(input=next_labels_batch)[0]
 
     # Since the labels are one-hot encoded, we can add it to the counts
     # directly. For example, if we have 3 classes, our counts start out
@@ -495,14 +495,14 @@ def calc_class_weights(filenames, x_dims, num_classes, num_domains, balance_pow=
     # if we do [0 0 0]+[1 0 0]=[1 0 0], i.e. we've seen one instance of
     # class 0 now.
     # Note: first sum over examples, then we'll add this to "counts"
-    increment_counts = tf.reduce_sum(tf.cast(next_labels_batch, tf.int32), axis=0)
+    increment_counts = tf.reduce_sum(input_tensor=tf.cast(next_labels_batch, tf.int32), axis=0)
 
     # Run on CPU since such a simple computation
     #config=tf.ConfigProto(device_count={'GPU': 0})
-    config = tf.ConfigProto()
+    config = tf.compat.v1.ConfigProto()
     config.gpu_options.per_process_gpu_memory_fraction = gpu_mem
 
-    with tf.train.SingularMonitoredSession(hooks=[input_hook], config=config) as sess:
+    with tf.compat.v1.train.SingularMonitoredSession(hooks=[input_hook], config=config) as sess:
         # Continue till we've looked at all the data
         while True:
             try:
@@ -515,7 +515,7 @@ def calc_class_weights(filenames, x_dims, num_classes, num_domains, balance_pow=
 
     # We only created a graph here to look through the data, but we don't want to
     # mess up the actual graph we'll use from this point on
-    tf.reset_default_graph()
+    tf.compat.v1.reset_default_graph()
 
     class_weights = np.power(total/counts, balance_pow)
     print("Class weights:", class_weights)

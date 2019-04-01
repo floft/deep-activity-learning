@@ -28,7 +28,7 @@ def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
 
     task_accuracy = []
     try:
-        for e in tf.train.summary_iterator(logfile):
+        for e in tf.compat.v1.train.summary_iterator(logfile):
             for v in e.summary.value:
                 if v.tag == tag:
                     task_accuracy.append((e.step, v.simple_value))

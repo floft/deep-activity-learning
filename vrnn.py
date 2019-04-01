@@ -30,7 +30,7 @@ class VRNNCell(tf.contrib.rnn.LayerRNNCell):
 
         # What cell we're going to use internally for the RNN
         # TODO tf.nn.rnn_cell.LSTMCell instead since contrib deprecated?
-        self.cell = tf.contrib.rnn.BasicLSTMCell(self.n_h)
+        self.cell = tf.compat.v1.nn.rnn_cell.BasicLSTMCell(self.n_h)
              #input_shape=(None, self.n_dec_hidden+self.n_z_1))
 
         super(VRNNCell, self).__init__(**kwargs)
@@ -59,67 +59,67 @@ class VRNNCell(tf.contrib.rnn.LayerRNNCell):
 
         # Input: previous hidden state
         self.prior_h = self.add_variable('prior/hidden/weights',
-            shape=(self.n_h, self.n_prior_hidden), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_h, self.n_prior_hidden), initializer=tf.compat.v1.glorot_uniform_initializer())
         self.prior_mu = self.add_variable('prior/mu/weights',
-            shape=(self.n_prior_hidden, self.n_z), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_prior_hidden, self.n_z), initializer=tf.compat.v1.glorot_uniform_initializer())
         self.prior_sigma = self.add_variable('prior/sigma/weights',
-            shape=(self.n_prior_hidden, self.n_z), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_prior_hidden, self.n_z), initializer=tf.compat.v1.glorot_uniform_initializer())
 
         if not self.batch_norm:
             self.prior_h_b = self.add_variable('prior/hidden/bias',
-                shape=(self.n_prior_hidden,), initializer=tf.constant_initializer())
+                shape=(self.n_prior_hidden,), initializer=tf.compat.v1.initializers.constant())
             self.prior_sigma_b = self.add_variable('prior/sigma/bias',
-                shape=(self.n_z,), initializer=tf.constant_initializer())
+                shape=(self.n_z,), initializer=tf.compat.v1.initializers.constant())
         self.prior_mu_b = self.add_variable('prior/mu/bias',
-            shape=(self.n_z,), initializer=tf.constant_initializer())
+            shape=(self.n_z,), initializer=tf.compat.v1.initializers.constant())
 
         # Input: x
         self.x_1 = self.add_variable('phi_x/weights',
-            shape=(self.n_x, self.n_x_1), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_x, self.n_x_1), initializer=tf.compat.v1.glorot_uniform_initializer())
 
         if not self.batch_norm:
             self.x_1_b = self.add_variable('phi_x/bias',
-                shape=(self.n_x_1,), initializer=tf.constant_initializer())
+                shape=(self.n_x_1,), initializer=tf.compat.v1.initializers.constant())
 
         # Input: x and previous hidden state
         self.encoder_h = self.add_variable('encoder/hidden/weights',
-            shape=(self.n_x_1+self.n_h, self.n_enc_hidden), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_x_1+self.n_h, self.n_enc_hidden), initializer=tf.compat.v1.glorot_uniform_initializer())
         self.encoder_mu = self.add_variable('encoder/mu/weights',
-            shape=(self.n_enc_hidden, self.n_z), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_enc_hidden, self.n_z), initializer=tf.compat.v1.glorot_uniform_initializer())
         self.encoder_sigma = self.add_variable('encoder/sigma/weights',
-            shape=(self.n_enc_hidden, self.n_z), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_enc_hidden, self.n_z), initializer=tf.compat.v1.glorot_uniform_initializer())
 
         if not self.batch_norm:
             self.encoder_h_b = self.add_variable('encoder/hidden/bias',
-                shape=(self.n_enc_hidden,), initializer=tf.constant_initializer())
+                shape=(self.n_enc_hidden,), initializer=tf.compat.v1.initializers.constant())
             self.encoder_sigma_b = self.add_variable('encoder/sigma/bias',
-                shape=(self.n_z,), initializer=tf.constant_initializer())
+                shape=(self.n_z,), initializer=tf.compat.v1.initializers.constant())
         self.encoder_mu_b = self.add_variable('encoder/mu/bias',
-            shape=(self.n_z,), initializer=tf.constant_initializer())
+            shape=(self.n_z,), initializer=tf.compat.v1.initializers.constant())
 
         # Input: z = enc_sigma*eps + enc_mu -- i.e. reparameterization trick
         self.z_1 = self.add_variable('phi_z/weights',
-            shape=(self.n_z, self.n_z_1), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_z, self.n_z_1), initializer=tf.compat.v1.glorot_uniform_initializer())
 
         if not self.batch_norm:
             self.z_1_b = self.add_variable('phi_z/bias',
-                shape=(self.n_z_1,), initializer=tf.constant_initializer())
+                shape=(self.n_z_1,), initializer=tf.compat.v1.initializers.constant())
 
         # Input: latent variable (z) and previous hidden state
         self.decoder_h = self.add_variable('decoder/hidden/weights',
-            shape=(self.n_z+self.n_h, self.n_dec_hidden), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_z+self.n_h, self.n_dec_hidden), initializer=tf.compat.v1.glorot_uniform_initializer())
         self.decoder_mu = self.add_variable('decoder/mu/weights',
-            shape=(self.n_dec_hidden, self.n_x), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_dec_hidden, self.n_x), initializer=tf.compat.v1.glorot_uniform_initializer())
         self.decoder_sigma = self.add_variable('decoder/sigma/weights',
-            shape=(self.n_dec_hidden, self.n_x), initializer=tf.glorot_uniform_initializer())
+            shape=(self.n_dec_hidden, self.n_x), initializer=tf.compat.v1.glorot_uniform_initializer())
 
         if not self.batch_norm:
             self.decoder_h_b = self.add_variable('decoder/hidden/bias',
-                shape=(self.n_dec_hidden,), initializer=tf.constant_initializer())
+                shape=(self.n_dec_hidden,), initializer=tf.compat.v1.initializers.constant())
             self.decoder_sigma_b = self.add_variable('decoder/sigma/bias',
-                shape=(self.n_x,), initializer=tf.constant_initializer())
+                shape=(self.n_x,), initializer=tf.compat.v1.initializers.constant())
         self.decoder_mu_b = self.add_variable('decoder/mu/bias',
-            shape=(self.n_x,), initializer=tf.constant_initializer())
+            shape=(self.n_x,), initializer=tf.compat.v1.initializers.constant())
 
         super(VRNNCell, self).build(input_shape)
 
@@ -159,8 +159,8 @@ class VRNNCell(tf.contrib.rnn.LayerRNNCell):
         encoder_mu = tf.matmul(encoder_h, self.encoder_mu) + self.encoder_mu_b
 
         # Input: z = enc_sigma*eps + enc_mu -- i.e. reparameterization trick
-        batch_size = tf.shape(inputs)[0] # https://github.com/tensorflow/tensorflow/issues/373
-        eps = tf.random_normal((batch_size, self.n_z), dtype=tf.float32)
+        batch_size = tf.shape(input=inputs)[0] # https://github.com/tensorflow/tensorflow/issues/373
+        eps = tf.random.normal((batch_size, self.n_z), dtype=tf.float32)
         z = encoder_sigma*eps + encoder_mu
         if self.batch_norm:
             z_1 = tf.nn.relu(tf.contrib.layers.batch_norm(tf.matmul(z, self.z_1), is_training=self.training, updates_collections=None))

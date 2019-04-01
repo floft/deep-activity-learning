@@ -91,25 +91,25 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
     print(target+","+str(fold)+","+model+","+str(max_accuracy_step)+","+str(max_accuracy))
 
     # Load train dataset
-    with tf.variable_scope("training_data_a"):
+    with tf.compat.v1.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
             tfrecords_train_a, batch_size, x_dims, num_classes, num_domains,
             evaluation=True)
         next_data_batch_a, next_labels_batch_a, next_domains_batch_a = input_fn_a()
-    with tf.variable_scope("training_data_b"):
+    with tf.compat.v1.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
             tfrecords_train_b, batch_size, x_dims, num_classes, num_domains,
             evaluation=True)
         next_data_batch_b, next_labels_batch_b, next_domains_batch_b = input_fn_b()
 
     # Load test dataset
-    with tf.variable_scope("evaluation_data_a"):
+    with tf.compat.v1.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
             tfrecords_test_a, batch_size, x_dims, num_classes, num_domains,
             evaluation=True)
         next_data_batch_test_a, next_labels_batch_test_a, \
             next_domains_batch_test_a = eval_input_fn_a()
-    with tf.variable_scope("evaluation_data_b"):
+    with tf.compat.v1.variable_scope("evaluation_data_b"):
         eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
             tfrecords_test_b, batch_size, x_dims, num_classes, num_domains,
             evaluation=True)
@@ -124,7 +124,7 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
     # Only build graph in this process if we're the first run, i.e. if the graph
     # isn't already built. Alternatively we could reset the graph with
     # tf.reset_default_graph() and then recreate it.
-    already_built = len(tf.trainable_variables()) > 0
+    already_built = len(tf.compat.v1.trainable_variables()) > 0
 
     # We have no access to the process itself when running multiple jobs and the
     # variables are out of scope by the time we get here a second time. Thus,
@@ -154,12 +154,12 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
             raise NotImplementedError()
 
         # Inputs
-        keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
-        x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-        domain = tf.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
-        y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
-        training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
-        grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
+        keep_prob = tf.compat.v1.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
+        x = tf.compat.v1.placeholder(tf.float32, [None]+x_dims, name='x') # input data
+        domain = tf.compat.v1.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
+        y = tf.compat.v1.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
+        training = tf.compat.v1.placeholder(tf.bool, name='training') # whether we're training (batch norm)
+        grl_lambda = tf.compat.v1.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
 
         # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
         task_classifier, domain_classifier, _, \
@@ -180,15 +180,15 @@ def process_model(model_dir, log_dir, model, features, target, fold, al_config,
 
         reset_metrics = reset_a + reset_b
 
-        config = tf.ConfigProto()
+        config = tf.compat.v1.ConfigProto()
         # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
         config.gpu_options.per_process_gpu_memory_fraction = gpu_mem
 
         # Don't keep recreating the session
-        sess = tf.Session(config=config)
+        sess = tf.compat.v1.Session(config=config)
 
     # Load checkpoint
-    saver = tf.train.Saver()
+    saver = tf.compat.v1.train.Saver()
     saver.restore(sess, ckpt)
 
     # Train data

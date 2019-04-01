@@ -257,11 +257,11 @@ def create_reset_metric(metric, scope='reset_metrics', **metric_args):
     Metric that can be reset
     https://github.com/tensorflow/tensorflow/issues/4814#issuecomment-314801758
     """
-    with tf.variable_scope(scope) as scope:
+    with tf.compat.v1.variable_scope(scope) as scope:
         metric_op, update_op = metric(**metric_args)
         variables = tf.contrib.framework.get_variables(
-            scope, collection=tf.GraphKeys.LOCAL_VARIABLES)
-        reset_op = tf.variables_initializer(variables)
+            scope, collection=tf.compat.v1.GraphKeys.LOCAL_VARIABLES)
+        reset_op = tf.compat.v1.variables_initializer(variables)
 
     return metric_op, update_op, reset_op
 
@@ -281,7 +281,7 @@ def metric_summaries(domain,
     summs = [[] for d in datasets]
     summs_values = {}
 
-    with tf.variable_scope("metrics_%s" % domain):
+    with tf.compat.v1.variable_scope("metrics_%s" % domain):
         # Depending on if multi-class, what we consider a positive class is different
         # TODO this actually is probably actually wrong for multi-class
         if multi_class:
@@ -299,31 +299,31 @@ def metric_summaries(domain,
             # max value
             # e.g. [0.2 0.2 0.4 0.2] -> [0 0 1 0]
             per_class_predictions = tf.one_hot(
-                tf.argmax(task_predictions_raw, axis=-1), num_classes)
+                tf.argmax(input=task_predictions_raw, axis=-1), num_classes)
 
             # For overall accuracy if not multi-class, we want to look at *just*
             # the argmax; otherwise, if there's a bunch of classes we'll get very
             # high accuracies due to all the matching zeros.
-            acc_labels = tf.argmax(task_labels, axis=-1,
+            acc_labels = tf.argmax(input=task_labels, axis=-1,
                 output_type=tf.int32)
-            acc_predictions = tf.argmax(task_predictions_raw, axis=-1,
+            acc_predictions = tf.argmax(input=task_predictions_raw, axis=-1,
                 output_type=tf.int32)
 
         # Domain classification accuracy is always binary
-        domain_acc_labels = tf.argmax(domain_labels, axis=-1,
+        domain_acc_labels = tf.argmax(input=domain_labels, axis=-1,
             output_type=tf.int32)
-        domain_acc_predictions = tf.argmax(domain_predictions_raw, axis=-1,
+        domain_acc_predictions = tf.argmax(input=domain_predictions_raw, axis=-1,
             output_type=tf.int32)
 
         # Overall metrics
         task_acc, update_task_acc, reset_task_acc = create_reset_metric(
-            tf.metrics.accuracy, "task_acc",
+            tf.compat.v1.metrics.accuracy, "task_acc",
             labels=acc_labels, predictions=acc_predictions)
         task_auc, update_task_auc, reset_task_auc = create_reset_metric(
-            tf.metrics.auc, "task_auc",
+            tf.compat.v1.metrics.auc, "task_auc",
             labels=task_labels, predictions=task_predictions_raw)
         domain_acc, update_domain_acc, reset_domain_acc = create_reset_metric(
-            tf.metrics.accuracy, "domain_acc",
+            tf.compat.v1.metrics.accuracy, "domain_acc",
             labels=domain_acc_labels, predictions=domain_acc_predictions)
 
     reset_metrics = [reset_task_acc, reset_task_auc, reset_domain_acc]
@@ -331,9 +331,9 @@ def metric_summaries(domain,
 
     for j, dataset in enumerate(datasets):
         summs[j] += [
-            tf.summary.scalar("auc_task/%s/%s" % (domain, dataset), task_auc),
-            tf.summary.scalar("accuracy_task/%s/%s" % (domain, dataset), task_acc),
-            tf.summary.scalar("accuracy_domain/%s/%s" % (domain, dataset), domain_acc),
+            tf.compat.v1.summary.scalar("auc_task/%s/%s" % (domain, dataset), task_auc),
+            tf.compat.v1.summary.scalar("accuracy_task/%s/%s" % (domain, dataset), task_acc),
+            tf.compat.v1.summary.scalar("accuracy_domain/%s/%s" % (domain, dataset), domain_acc),
         ]
 
         summs_values["auc_task/%s/%s" % (domain, dataset)] = task_auc
@@ -344,12 +344,12 @@ def metric_summaries(domain,
     for i in range(num_classes):
         class_name = config.int_to_label(i)
 
-        with tf.variable_scope("metrics_%s/class_%s" % (domain,class_name)):
+        with tf.compat.v1.variable_scope("metrics_%s/class_%s" % (domain,class_name)):
             # Get ith column (all groundtruth/predictions for ith class)
             class_y = tf.slice(
-                task_labels, [0,i], [tf.shape(task_labels)[0], 1])
+                task_labels, [0,i], [tf.shape(input=task_labels)[0], 1])
             class_predictions = tf.slice(
-                per_class_predictions, [0,i], [tf.shape(task_labels)[0], 1])
+                per_class_predictions, [0,i], [tf.shape(input=task_labels)[0], 1])
 
             if multi_class:
                 # Note: using the above directly works for multi-class since any
@@ -367,32 +367,32 @@ def metric_summaries(domain,
                 acc_class_predictions = tf.gather(class_predictions, rows_of_class_y)
 
         for j, dataset in enumerate(datasets):
-            with tf.variable_scope("metrics_%s/class_%s/%s" % (domain,class_name,dataset)):
+            with tf.compat.v1.variable_scope("metrics_%s/class_%s/%s" % (domain,class_name,dataset)):
                 acc, update_acc, reset_acc = create_reset_metric(
-                    tf.metrics.accuracy, "acc_%d" % j,
+                    tf.compat.v1.metrics.accuracy, "acc_%d" % j,
                     labels=acc_class_y, predictions=acc_class_predictions)
                 tp, update_TP, reset_TP = create_reset_metric(
-                    tf.metrics.true_positives, "TP_%d" % j,
+                    tf.compat.v1.metrics.true_positives, "TP_%d" % j,
                     labels=class_y, predictions=class_predictions)
                 fp, update_FP, reset_FP = create_reset_metric(
-                    tf.metrics.false_positives, "FP_%d" % j,
+                    tf.compat.v1.metrics.false_positives, "FP_%d" % j,
                     labels=class_y, predictions=class_predictions)
                 tn, update_TN, reset_TN = create_reset_metric(
-                    tf.metrics.true_negatives, "TN_%d" % j,
+                    tf.compat.v1.metrics.true_negatives, "TN_%d" % j,
                     labels=class_y, predictions=class_predictions)
                 fn, update_FN, reset_FN = create_reset_metric(
-                    tf.metrics.false_negatives, "FN_%d" % j,
+                    tf.compat.v1.metrics.false_negatives, "FN_%d" % j,
                     labels=class_y, predictions=class_predictions)
 
             reset_metrics += [reset_acc, reset_TP, reset_FP, reset_TN, reset_FN]
             update_metrics += [update_acc, update_TP, update_FP, update_TN, update_FN]
 
             summs[j] += [
-                tf.summary.scalar("accuracy_task_class_%s/%s/%s" % (class_name,domain,dataset), acc),
-                tf.summary.scalar("rates_class_%s/TP/%s/%s" % (class_name,domain,dataset), tp),
-                tf.summary.scalar("rates_class_%s/FP/%s/%s" % (class_name,domain,dataset), fp),
-                tf.summary.scalar("rates_class_%s/TN/%s/%s" % (class_name,domain,dataset), tn),
-                tf.summary.scalar("rates_class_%s/FN/%s/%s" % (class_name,domain,dataset), fn),
+                tf.compat.v1.summary.scalar("accuracy_task_class_%s/%s/%s" % (class_name,domain,dataset), acc),
+                tf.compat.v1.summary.scalar("rates_class_%s/TP/%s/%s" % (class_name,domain,dataset), tp),
+                tf.compat.v1.summary.scalar("rates_class_%s/FP/%s/%s" % (class_name,domain,dataset), fp),
+                tf.compat.v1.summary.scalar("rates_class_%s/TN/%s/%s" % (class_name,domain,dataset), tn),
+                tf.compat.v1.summary.scalar("rates_class_%s/FN/%s/%s" % (class_name,domain,dataset), fn),
             ]
 
             summs_values["accuracy_task_class_%s/%s/%s" % (class_name,domain,dataset)] = acc
@@ -419,11 +419,11 @@ def opt_with_summ(optimizer, loss, var_list=None):
     for grad, var in grads:
         # Skip those whose gradient is not computed (i.e. not in var list above)
         if grad is not None:
-            summaries.append(tf.summary.histogram("{}-grad".format(var.name), grad))
+            summaries.append(tf.compat.v1.summary.histogram("{}-grad".format(var.name), grad))
 
     return update_step, summaries
 
-class RemoveOldCheckpointSaverListener(tf.train.CheckpointSaverListener):
+class RemoveOldCheckpointSaverListener(tf.estimator.CheckpointSaverListener):
     """
     Remove checkpoints that are not the best or the last one so we don't waste
     tons of disk space
@@ -509,25 +509,25 @@ def train(
         batch_size = batch_size // 2
 
     # Input training data
-    with tf.variable_scope("training_data_a"):
+    with tf.compat.v1.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
             tfrecords_train_a, batch_size, x_dims, num_classes, num_domains,
             data_augmentation=data_augmentation)
         next_data_batch_a, next_labels_batch_a, next_domains_batch_a = input_fn_a()
-    with tf.variable_scope("training_data_b"):
+    with tf.compat.v1.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
             tfrecords_train_b, batch_size, x_dims, num_classes, num_domains,
             data_augmentation=data_augmentation)
         next_data_batch_b, next_labels_batch_b, next_domains_batch_b = input_fn_b()
 
     # Load all the test data in one batch
-    with tf.variable_scope("evaluation_data_a"):
+    with tf.compat.v1.variable_scope("evaluation_data_a"):
         eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
             tfrecords_test_a, batch_size, x_dims, num_classes, num_domains,
             evaluation=True)
         next_data_batch_test_a, next_labels_batch_test_a, \
             next_domains_batch_test_a = eval_input_fn_a()
-    with tf.variable_scope("evaluation_data_b"):
+    with tf.compat.v1.variable_scope("evaluation_data_b"):
         eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
             tfrecords_test_b, batch_size, x_dims, num_classes, num_domains,
             evaluation=True)
@@ -541,13 +541,13 @@ def train(
         num_domains = 2
 
     # Inputs
-    keep_prob = tf.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
-    x = tf.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-    domain = tf.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
-    y = tf.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
-    training = tf.placeholder(tf.bool, name='training') # whether we're training (batch norm)
-    grl_lambda = tf.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
-    lr = tf.placeholder(tf.float32, (), name='learning_rate')
+    keep_prob = tf.compat.v1.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
+    x = tf.compat.v1.placeholder(tf.float32, [None]+x_dims, name='x') # input data
+    domain = tf.compat.v1.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
+    y = tf.compat.v1.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
+    training = tf.compat.v1.placeholder(tf.bool, name='training') # whether we're training (batch norm)
+    grl_lambda = tf.compat.v1.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
+    lr = tf.compat.v1.placeholder(tf.float32, (), name='learning_rate')
 
     # Source domain will be [[1,0], [1,0], ...] and target domain [[0,1], [0,1], ...]
     source_domain = domain_labels(0, batch_size, num_domains)
@@ -563,7 +563,7 @@ def train(
             multi_class, bidirectional, class_weights, x_dims, use_feature_extractor)
 
     # Get variables of model - needed if we train in two steps
-    variables = tf.trainable_variables()
+    variables = tf.compat.v1.trainable_variables()
     model_vars = [v for v in variables if '_model' in v.name]
     feature_extractor_vars = [v for v in variables if 'feature_extractor' in v.name]
     task_classifier_vars = [v for v in variables if 'task_classifier' in v.name]
@@ -582,16 +582,16 @@ def train(
     # the rest of the model. Thus, we need a quick way to calculate this for
     # the training batch. For evaluation I'll use tf.metrics but for this during
     # training I'll compute manually for simplicity.
-    with tf.variable_scope("domain_accuracy"):
-        domain_accuracy = tf.reduce_mean(tf.cast(tf.equal(
-                tf.argmax(domain, axis=-1),
-                tf.argmax(domain_classifier, axis=-1)),
+    with tf.compat.v1.variable_scope("domain_accuracy"):
+        domain_accuracy = tf.reduce_mean(input_tensor=tf.cast(tf.equal(
+                tf.argmax(input=domain, axis=-1),
+                tf.argmax(input=domain_classifier, axis=-1)),
             tf.float32))
 
     # Optimizer - update ops for batch norm layers
-    with tf.variable_scope("optimizer"), \
-        tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-        optimizer = tf.train.AdamOptimizer(lr)
+    with tf.compat.v1.variable_scope("optimizer"), \
+        tf.control_dependencies(tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)):
+        optimizer = tf.compat.v1.train.AdamOptimizer(lr)
 
         if plot_gradients:
             train_all, grad_summs = opt_with_summ(optimizer, total_loss)
@@ -611,7 +611,7 @@ def train(
     # run reset_metrics followed by the update_metrics_{a,b} (optionally over
     # multiple batches, e.g. if for the entire validation dataset). Then we
     # run and log the summaries.
-    train_a_summs = [tf.summary.scalar("loss/total_loss", total_loss)]
+    train_a_summs = [tf.compat.v1.summary.scalar("loss/total_loss", total_loss)]
 
     reset_a, update_metrics_a, summs, _ = metric_summaries(
         "source", y, task_classifier, domain, domain_classifier,
@@ -630,33 +630,33 @@ def train(
     # If we want to plot gradients, include both the training summaries and
     # gradient summaries
     if plot_gradients:
-        training_summaries_a = tf.summary.merge(train_a_summs+grad_summs)
+        training_summaries_a = tf.compat.v1.summary.merge(train_a_summs+grad_summs)
     else:
-        training_summaries_a = tf.summary.merge(train_a_summs)
+        training_summaries_a = tf.compat.v1.summary.merge(train_a_summs)
 
-    training_summaries_extra_a = tf.summary.merge(model_summaries)
-    training_summaries_b = tf.summary.merge(train_b_summs)
-    validation_summaries_a = tf.summary.merge(val_a_summs)
-    validation_summaries_b = tf.summary.merge(val_b_summs)
+    training_summaries_extra_a = tf.compat.v1.summary.merge(model_summaries)
+    training_summaries_b = tf.compat.v1.summary.merge(train_b_summs)
+    validation_summaries_a = tf.compat.v1.summary.merge(val_a_summs)
+    validation_summaries_b = tf.compat.v1.summary.merge(val_b_summs)
 
     # Allow restoring global_step from past run
     global_step = tf.Variable(0, name="global_step", trainable=False)
-    inc_global_step = tf.assign_add(global_step, 1, name='incr_global_step')
+    inc_global_step = tf.compat.v1.assign_add(global_step, 1, name='incr_global_step')
 
     # Keep track of state and summaries
-    saver = tf.train.Saver(max_to_keep=num_steps)
+    saver = tf.compat.v1.train.Saver(max_to_keep=num_steps)
     saver_listener = RemoveOldCheckpointSaverListener(log_dir, model_dir)
-    saver_hook = tf.train.CheckpointSaverHook(model_dir,
+    saver_hook = tf.estimator.CheckpointSaverHook(model_dir,
         save_steps=model_save_steps, saver=saver, listeners=[saver_listener])
-    writer = tf.summary.FileWriter(log_dir)
+    writer = tf.compat.v1.summary.FileWriter(log_dir)
 
     # Allow running two at once
     # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
-    config = tf.ConfigProto()
+    config = tf.compat.v1.ConfigProto()
     config.gpu_options.per_process_gpu_memory_fraction = gpu_memory
 
     # Start training
-    with tf.train.SingularMonitoredSession(checkpoint_dir=model_dir, hooks=[
+    with tf.compat.v1.train.SingularMonitoredSession(checkpoint_dir=model_dir, hooks=[
                 input_hook_a, input_hook_b,
                 saver_hook
             ], config=config) as sess:
@@ -773,8 +773,8 @@ def train(
 
             if i%log_save_steps == 0:
                 # Log the step time
-                summ = tf.Summary(value=[
-                    tf.Summary.Value(tag="step_time/model_train", simple_value=t)
+                summ = tf.compat.v1.Summary(value=[
+                    tf.compat.v1.Summary.Value(tag="step_time/model_train", simple_value=t)
                 ])
                 writer.add_summary(summ, step)
 
@@ -815,8 +815,8 @@ def train(
                 t = time.time() - t
 
                 # Log the time to update metrics
-                summ = tf.Summary(value=[
-                    tf.Summary.Value(tag="step_time/metrics/training", simple_value=t)
+                summ = tf.compat.v1.Summary(value=[
+                    tf.compat.v1.Summary.Value(tag="step_time/metrics/training", simple_value=t)
                 ])
                 writer.add_summary(summ, step)
 
@@ -847,8 +847,8 @@ def train(
                 t = time.time() - t
 
                 # Log the time to update metrics
-                summ = tf.Summary(value=[
-                    tf.Summary.Value(tag="step_time/metrics/validation", simple_value=t)
+                summ = tf.compat.v1.Summary(value=[
+                    tf.compat.v1.Summary.Value(tag="step_time/metrics/validation", simple_value=t)
                 ])
                 writer.add_summary(summ, step)
 
@@ -871,8 +871,8 @@ def train(
                 t = time.time() - t
 
                 # Log the time to update metrics
-                summ = tf.Summary(value=[
-                    tf.Summary.Value(tag="step_time/extra", simple_value=t)
+                summ = tf.compat.v1.Summary(value=[
+                    tf.compat.v1.Summary.Value(tag="step_time/extra", simple_value=t)
                 ])
                 writer.add_summary(summ, step)
 
@@ -891,16 +891,16 @@ def train(
                 if plots is not None:
                     for name, buf in plots:
                         # See: https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
-                        plot = tf.Summary.Image(encoded_image_string=buf)
-                        summ = tf.Summary(value=[tf.Summary.Value(
+                        plot = tf.compat.v1.Summary.Image(encoded_image_string=buf)
+                        summ = tf.compat.v1.Summary(value=[tf.compat.v1.Summary.Value(
                             tag=name, image=plot)])
                         writer.add_summary(summ, step)
 
                 t = time.time() - t
 
                 # Log the time to update metrics
-                summ = tf.Summary(value=[
-                    tf.Summary.Value(tag="step_time/plots", simple_value=t)
+                summ = tf.compat.v1.Summary(value=[
+                    tf.compat.v1.Summary.Value(tag="step_time/plots", simple_value=t)
                 ])
                 writer.add_summary(summ, step)
 

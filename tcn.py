@@ -14,7 +14,7 @@ Usage:
 """
 import tensorflow as tf
 
-class CausalConv1D(tf.layers.Conv1D):
+class CausalConv1D(tf.compat.v1.layers.Conv1D):
     def __init__(self, filters,
                kernel_size,
                strides=1,
@@ -22,7 +22,7 @@ class CausalConv1D(tf.layers.Conv1D):
                activation=None,
                use_bias=True,
                kernel_initializer=None,
-               bias_initializer=tf.zeros_initializer(),
+               bias_initializer=tf.compat.v1.initializers.zeros(),
                kernel_regularizer=None,
                bias_regularizer=None,
                activity_regularizer=None,
@@ -53,10 +53,10 @@ class CausalConv1D(tf.layers.Conv1D):
 
     def call(self, inputs):
         padding = (self.kernel_size[0] - 1) * self.dilation_rate[0]
-        inputs = tf.pad(inputs, tf.constant([(0, 0,), (1, 0), (0, 0)]) * padding)
+        inputs = tf.pad(tensor=inputs, paddings=tf.constant([(0, 0,), (1, 0), (0, 0)]) * padding)
         return super(CausalConv1D, self).call(inputs)
 
-class TemporalBlock(tf.layers.Layer):
+class TemporalBlock(tf.compat.v1.layers.Layer):
     def __init__(self, n_outputs, kernel_size, strides, dilation_rate, dropout=0.2,
                  trainable=True, name=None, dtype=None,
                  activity_regularizer=None, **kwargs):
@@ -79,13 +79,13 @@ class TemporalBlock(tf.layers.Layer):
 
     def build(self, input_shape):
         channel_dim = 2
-        self.dropout1 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.n_outputs)])
-        self.dropout2 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.n_outputs)])
+        self.dropout1 = tf.compat.v1.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.n_outputs)])
+        self.dropout2 = tf.compat.v1.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.n_outputs)])
         if input_shape[channel_dim] != self.n_outputs:
             # self.down_sample = tf.layers.Conv1D(
             #     self.n_outputs, kernel_size=1,
             #     activation=None, data_format="channels_last", padding="valid")
-            self.down_sample = tf.layers.Dense(self.n_outputs, activation=None)
+            self.down_sample = tf.compat.v1.layers.Dense(self.n_outputs, activation=None)
         self.built = True
 
     def call(self, inputs, training=True):
@@ -99,7 +99,7 @@ class TemporalBlock(tf.layers.Layer):
             inputs = self.down_sample(inputs)
         return tf.nn.relu(x + inputs)
 
-class TemporalConvNet(tf.layers.Layer):
+class TemporalConvNet(tf.compat.v1.layers.Layer):
     def __init__(self, num_channels, kernel_size=2, dropout=0.2,
                  trainable=True, name=None, dtype=None,
                  activity_regularizer=None, **kwargs):

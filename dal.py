@@ -513,9 +513,7 @@ def train(
         tfrecords_train_a, tfrecords_train_b,
         tfrecords_test_a, tfrecords_test_b,
         config,
-        model_func=build_lstm,
-        model_dir="models",
-        log_dir="logs",
+        model_dir, log_dir,
         multi_class=False,
         class_weights=1.0):
 
@@ -574,8 +572,22 @@ def train(
     source_domain = domain_labels(0, batch_size, num_domains)
     target_domain = domain_labels(1, batch_size, num_domains)
 
+    if FLAGS.model == "lstm":
+        model_func = build_lstm
+    elif FLAGS.model == "vrnn":
+        model_func = build_vrnn
+    elif FLAGS.model == "cnn":
+        model_func = build_cnn
+    elif FLAGS.model == "resnet":
+        model_func = build_resnet
+    elif FLAGS.model == "attention":
+        model_func = build_attention
+    elif FLAGS.model == "tcn":
+        model_func = build_tcn
+    elif FLAGS.model == "flat":
+        model_func = build_flat
+
     # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
-    #
     # Optionally also returns additional summaries to log, e.g. loss components
     task_classifier, domain_classifier, total_loss, \
     feature_extractor, model_summaries, extra_model_outputs = \
@@ -951,29 +963,7 @@ def main(argv):
     else:
         class_weights = 1.0
 
-    prefix = FLAGS.target+"-fold"+str(FLAGS.fold)+"-"
-
-    if FLAGS.model == "lstm":
-        prefix += "lstm"
-        model_func = build_lstm
-    elif FLAGS.model == "vrnn":
-        prefix += "vrnn"
-        model_func = build_vrnn
-    elif FLAGS.model == "cnn":
-        prefix += "cnn"
-        model_func = build_cnn
-    elif FLAGS.model == "resnet":
-        prefix += "resnet"
-        model_func = build_resnet
-    elif FLAGS.model == "attention":
-        prefix += "attention"
-        model_func = build_attention
-    elif FLAGS.model == "tcn":
-        prefix += "tcn"
-        model_func = build_tcn
-    elif FLAGS.model == "flat":
-        prefix += "flat"
-        model_func = build_flat
+    prefix = FLAGS.target+"-fold"+str(FLAGS.fold)+"-"+FLAGS.model
 
     assert not (FLAGS.adaptation and FLAGS.generalization), \
         "Currently cannot enable both adaptation and generalization at the same time"
@@ -1013,7 +1003,6 @@ def main(argv):
             tfrecords_train_a, tfrecords_train_b,
             tfrecords_test_a, tfrecords_test_b,
             config=al_config,
-            model_func=model_func,
             model_dir=model_dir,
             log_dir=log_dir,
             multi_class=False,

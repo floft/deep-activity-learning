@@ -12,6 +12,10 @@ import tensorflow as tf
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 
+from absl import app
+from absl import flags
+from absl import logging
+
 # Make sure matplotlib is not interactive
 import matplotlib as mpl
 mpl.use('Agg')
@@ -26,6 +30,46 @@ from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
 from eval_utils import get_files_to_keep, get_step_from_log, delete_models_except
 from file_utils import last_modified_number, get_best_valid_accuracy, \
     write_best_valid_accuracy, write_finished
+
+FLAGS = flags.FLAGS
+
+flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
+flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
+flags.DEFINE_boolean("adapt", False, "Perform domain adaptation on the model")
+flags.DEFINE_boolean("generalize", False, "Perform domain generalization on the model")
+flags.DEFINE_enum("model", None, ["lstm", "vrnn", "cnn", "resnet", "attention", "tcn", "flat"], "What model type to use")
+flags.DEFINE_integer("fold", 0, "What fold to use from the dataset files")
+flags.DEFINE_string("target", "", "What dataset to use as the target (default none, i.e. blank)")
+flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
+flags.DEFINE_integer("units", 50, "Number of LSTM hidden units and VRNN latent variable size")
+flags.DEFINE_integer("layers", 5, "Number of layers for the feature extractor")
+flags.DEFINE_integer("steps", 100000, "Number of training steps to run")
+flags.DEFINE_integer("batch", 1024, "Batch size to use")
+flags.DEFINE_float("lr", 0.0001, "Learning rate for training")
+flags.DEFINE_float("lr_mult", 1.0, "Multiplier for extra discriminator training learning rate")
+flags.DEFINE_float("dropout", 0.95, "Keep probability for dropout")
+flags.DEFINE_float("gpu_mem", 0.4, "Percentage of GPU memory to let TensorFlow use")
+flags.DEFINE_integer("model_steps", 4000, "Save the model every so many steps")
+flags.DEFINE_integer("log_steps", 500, "Log training losses and accuracy every so many steps")
+flags.DEFINE_integer("log_steps_val", 4000, "Log validation accuracy and AUC every so many steps")
+flags.DEFINE_integer("log_steps_extra", 100000, "Log weights, plots, etc. every so many steps")
+flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
+flags.DEFINE_integer("max_plot_examples", 1000, "Max number of examples to use for plotting")
+flags.DEFINE_boolean("balance", True, "On high class imbalances weight the loss function")
+flags.DEFINE_boolean("augment", False, "Perform data augmentation (for simple2 dataset)")
+flags.DEFINE_boolean("sample", False, "Only use a small amount of data for training/testing")
+flags.DEFINE_boolean("test", False, "Swap out validation data for real test data (debugging in tensorboard)")
+flags.DEFINE_float("balance_pow", 1.0, "For increased balancing, raise weights to a specified power")
+flags.DEFINE_boolean("bidirectional", False, "Use a bidirectional RNN (when selected method includes an RNN)")
+flags.DEFINE_boolean("feature_extractor", True, "Use a feature extractor before task classifier/domain predictor")
+flags.DEFINE_float("min_domain_accuracy", 0.5, "If generalize, min domain classifier accuracy")
+flags.DEFINE_float("max_domain_iters", 10, "If generalize, max domain classifier training iterations")
+flags.DEFINE_boolean("debug", False, "Start new log/model/images rather than continuing from previous run")
+flags.DEFINE_integer("debug_num", -1, "Specify exact log/model/images number to use rather than incrementing from last. (Don't pass both this and --debug at the same time.)")
+
+flags.mark_flag_as_required("model")
+flags.register_validator("dropout", lambda v: v != 0, message="dropout cannot be zero")
+
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -470,33 +514,10 @@ def train(
         tfrecords_test_a, tfrecords_test_b,
         config,
         model_func=build_lstm,
-        batch_size=2048,
-        num_steps=100000,
-        learning_rate=0.0003,
-        lr_multiplier=1,
-        dropout_keep_prob=0.8,
-        units=100,
-        layers=5,
-        use_feature_extractor=True,
         model_dir="models",
         log_dir="logs",
-        model_save_steps=1000,
-        log_save_steps=100,
-        log_validation_accuracy_steps=2000,
-        log_extra_save_steps=2000,
-        adaptation=True,
-        generalization=False,
         multi_class=False,
-        bidirectional=False,
-        class_weights=1.0,
-        plot_gradients=False,
-        min_domain_accuracy=0.5,
-        max_domain_iters=10,
-        gpu_memory=0.8,
-        max_examples=0,
-        max_plot_examples=100,
-        regularization=False,
-        data_augmentation=False):
+        class_weights=1.0):
 
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
@@ -505,19 +526,19 @@ def train(
 
     # For adaptation, we'll be concatenating together half source and half target
     # data, so to keep the batch_size about the same, we'll cut it in half
-    if adaptation:
+    if FLAGS.adaptation:
         batch_size = batch_size // 2
 
     # Input training data
     with tf.compat.v1.variable_scope("training_data_a"):
         input_fn_a, input_hook_a = _get_tfrecord_input_fn(
             tfrecords_train_a, batch_size, x_dims, num_classes, num_domains,
-            data_augmentation=data_augmentation)
+            data_augmentation=FLAGS.augment)
         next_data_batch_a, next_labels_batch_a, next_domains_batch_a = input_fn_a()
     with tf.compat.v1.variable_scope("training_data_b"):
         input_fn_b, input_hook_b = _get_tfrecord_input_fn(
             tfrecords_train_b, batch_size, x_dims, num_classes, num_domains,
-            data_augmentation=data_augmentation)
+            data_augmentation=FLAGS.augment)
         next_data_batch_b, next_labels_batch_b, next_domains_batch_b = input_fn_b()
 
     # Load all the test data in one batch
@@ -537,7 +558,7 @@ def train(
     # Above we needed to load with the right number of num_domains, but for
     # adaptation, we only want two: source and target. Default for any
     # non-generalization to also use two since the resulting network is smaller.
-    if not generalization:
+    if not FLAGS.generalization:
         num_domains = 2
 
     # Inputs
@@ -559,8 +580,8 @@ def train(
     task_classifier, domain_classifier, total_loss, \
     feature_extractor, model_summaries, extra_model_outputs = \
         model_func(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_domains, num_features, adaptation, generalization, units, layers,
-            multi_class, bidirectional, class_weights, x_dims, use_feature_extractor)
+            num_classes, num_domains, num_features, FLAGS.adaptation, FLAGS.generalization, FLAGS.units, FLAGS.layers,
+            multi_class, FLAGS.bidirectional, class_weights, x_dims, FLAGS.feature_extractor)
 
     # Get variables of model - needed if we train in two steps
     variables = tf.compat.v1.trainable_variables()
@@ -568,14 +589,6 @@ def train(
     feature_extractor_vars = [v for v in variables if 'feature_extractor' in v.name]
     task_classifier_vars = [v for v in variables if 'task_classifier' in v.name]
     domain_classifier_vars = [v for v in variables if 'domain_classifier' in v.name]
-
-    # If we want regularization, add it to the total loss
-    if regularization:
-        regularizer = tf.contrib.layers.l1_l2_regularizer(0.05, 0.05)
-        weights = [v for v in variables if 'weights' in v.name]
-        penalty = tf.contrib.layers.apply_regularization(regularizer, weights)
-
-        total_loss += penalty
 
     # If the discriminator has lower than a certain accuracy on classifying which
     # domain a feature output was from, then we'll train that and skip training
@@ -592,16 +605,12 @@ def train(
     with tf.compat.v1.variable_scope("optimizer"), \
         tf.control_dependencies(tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)):
         optimizer = tf.compat.v1.train.AdamOptimizer(lr)
-
-        if plot_gradients:
-            train_all, grad_summs = opt_with_summ(optimizer, total_loss)
-        else:
-            train_all = optimizer.minimize(total_loss)
+        train_all = optimizer.minimize(total_loss)
 
         train_notdomain = optimizer.minimize(total_loss,
             var_list=model_vars+feature_extractor_vars+task_classifier_vars)
 
-        if adaptation or generalization:
+        if FLAGS.adaptation or FLAGS.generalization:
             train_domain = optimizer.minimize(total_loss,
                 var_list=domain_classifier_vars)
 
@@ -627,13 +636,7 @@ def train(
 
     reset_metrics = reset_a + reset_b
 
-    # If we want to plot gradients, include both the training summaries and
-    # gradient summaries
-    if plot_gradients:
-        training_summaries_a = tf.compat.v1.summary.merge(train_a_summs+grad_summs)
-    else:
-        training_summaries_a = tf.compat.v1.summary.merge(train_a_summs)
-
+    training_summaries_a = tf.compat.v1.summary.merge(train_a_summs)
     training_summaries_extra_a = tf.compat.v1.summary.merge(model_summaries)
     training_summaries_b = tf.compat.v1.summary.merge(train_b_summs)
     validation_summaries_a = tf.compat.v1.summary.merge(val_a_summs)
@@ -644,16 +647,16 @@ def train(
     inc_global_step = tf.compat.v1.assign_add(global_step, 1, name='incr_global_step')
 
     # Keep track of state and summaries
-    saver = tf.compat.v1.train.Saver(max_to_keep=num_steps)
+    saver = tf.compat.v1.train.Saver(max_to_keep=FLAGS.steps)
     saver_listener = RemoveOldCheckpointSaverListener(log_dir, model_dir)
     saver_hook = tf.estimator.CheckpointSaverHook(model_dir,
-        save_steps=model_save_steps, saver=saver, listeners=[saver_listener])
+        save_steps=FLAGS.model_steps, saver=saver, listeners=[saver_listener])
     writer = tf.compat.v1.summary.FileWriter(log_dir)
 
     # Allow running two at once
     # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
     config = tf.compat.v1.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = gpu_memory
+    config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_mem
 
     # Start training
     with tf.compat.v1.train.SingularMonitoredSession(checkpoint_dir=model_dir, hooks=[
@@ -661,14 +664,14 @@ def train(
                 saver_hook
             ], config=config) as sess:
 
-        for i in range(sess.run(global_step),num_steps+1):
+        for i in range(sess.run(global_step),FLAGS.steps+1):
             if i == 0:
                 writer.add_graph(sess.graph)
 
             # GRL schedule and learning rate schedule from DANN paper
-            grl_lambda_value = 2/(1+np.exp(-10*(i/(num_steps+1))))-1
+            grl_lambda_value = 2/(1+np.exp(-10*(i/(FLAGS.steps+1))))-1
             #lr_value = 0.001/(1.0+10*i/(num_steps+1))**0.75
-            lr_value = learning_rate
+            lr_value = FLAGS.lr
 
             t = time.time()
             step = sess.run(inc_global_step)
@@ -685,7 +688,7 @@ def train(
                     next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
                 ])
 
-            if adaptation:
+            if FLAGS.adaptation:
                 assert next_data_batch_b is not None, \
                     "Cannot perform adaptation without a domain B dataset"
 
@@ -702,7 +705,7 @@ def train(
                 sess.run(train_all, feed_dict={
                     x: combined_x, y: combined_labels, domain: combined_domain,
                     grl_lambda: grl_lambda_value,
-                    keep_prob: dropout_keep_prob, lr: lr_value, training: True
+                    keep_prob: FLAGS.dropout, lr: lr_value, training: True
                 })
 
                 # Update domain more
@@ -713,7 +716,7 @@ def train(
                 sess.run(train_domain, feed_dict={
                     x: combined_x, y: combined_labels, domain: combined_domain,
                     grl_lambda: 0.0,
-                    keep_prob: dropout_keep_prob, lr: lr_multiplier*lr_value, training: True
+                    keep_prob: FLAGS.dropout, lr: FLAGS.lr_mult*lr_value, training: True
                 })
 
                 # Train only the domain predictor / discriminator
@@ -737,26 +740,26 @@ def train(
                 #         x: combined_x, y: combined_labels, domain: combined_domain_flip,
                 #         keep_prob: dropout_keep_prob, lr: lr_value, training: True
                 #     })
-            elif generalization:
+            elif FLAGS.generalization:
                 sess.run(train_all, feed_dict={
                     x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
                     grl_lambda: grl_lambda_value,
-                    keep_prob: dropout_keep_prob, lr: lr_value, training: True
+                    keep_prob: FLAGS.dropout, lr: lr_value, training: True
                 })
 
                 # Update discriminator till it's accurate enough
-                for j in range(max_domain_iters):
+                for j in range(FLAGS.max_domain_iters):
                     feed_dict = {
                         x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
                         grl_lambda: 0.0,
-                        keep_prob: dropout_keep_prob, lr: lr_multiplier*lr_value, training: True
+                        keep_prob: FLAGS.dropout, lr: FLAGS.lr_mult*lr_value, training: True
                     }
                     sess.run(train_domain, feed_dict=feed_dict)
 
                     # Break if high enough accuracy
                     domain_acc = sess.run(domain_accuracy, feed_dict=feed_dict)
 
-                    if domain_acc > min_domain_accuracy:
+                    if domain_acc > FLAGS.min_domain_accuracy:
                         break
 
                 # For debugging, print occasionally
@@ -766,12 +769,12 @@ def train(
                 # Train task classifier on source domain to be correct
                 sess.run(train_notdomain, feed_dict={
                     x: data_batch_a, y: labels_batch_a,
-                    keep_prob: dropout_keep_prob, lr: lr_value, training: True
+                    keep_prob: FLAGS.dropout, lr: lr_value, training: True
                 })
 
             t = time.time() - t
 
-            if i%log_save_steps == 0:
+            if i%FLAGS.log_save_steps == 0:
                 # Log the step time
                 summ = tf.compat.v1.Summary(value=[
                     tf.compat.v1.Summary.Value(tag="step_time/model_train", simple_value=t)
@@ -780,7 +783,7 @@ def train(
 
                 t = time.time()
 
-                if generalization:
+                if FLAGS.generalization:
                     domains_a = domains_batch_a
 
                     if next_data_batch_b is not None:
@@ -821,7 +824,7 @@ def train(
                 writer.add_summary(summ, step)
 
             # Log validation accuracy/AUC less frequently
-            if i%log_validation_accuracy_steps == 0:
+            if i%FLAGS.log_validation_accuracy_steps == 0:
                 t = time.time()
 
                 # Evaluation accuracy, AUC, rates, etc.
@@ -831,9 +834,9 @@ def train(
                     next_data_batch_test_a, next_labels_batch_test_a,
                     next_data_batch_test_b, next_labels_batch_test_b,
                     next_domains_batch_test_a, next_domains_batch_test_b,
-                    x, y, domain, keep_prob, training, num_domains, generalization,
+                    x, y, domain, keep_prob, training, num_domains, FLAGS.generalization,
                     batch_size, update_metrics_a, update_metrics_b,
-                    max_examples)
+                    FLAGS.max_examples)
 
                 # Add the summaries about rates that were updated above in the
                 # evaluation function (via update_metrics_* lists)
@@ -853,10 +856,10 @@ def train(
                 writer.add_summary(summ, step)
 
             # Larger stuff like weights and t-SNE plots occasionally
-            if i%log_extra_save_steps == 0:
+            if i%FLAGS.log_extra_save_steps == 0:
                 t = time.time()
 
-                if generalization:
+                if FLAGS.generalization:
                     domains_a = domains_batch_a
                 else:
                     domains_a = source_domain
@@ -884,9 +887,9 @@ def train(
                     eval_input_hook_a, eval_input_hook_b,
                     next_data_batch_test_a, next_labels_batch_test_a,
                     next_data_batch_test_b, next_labels_batch_test_b,
-                    feature_extractor, x, keep_prob, training, adaptation,
+                    feature_extractor, x, keep_prob, training, FLAGS.adaptation,
                     extra_model_outputs, num_features, first_step, config,
-                    max_plot_examples)
+                    FLAGS.max_plot_examples)
 
                 if plots is not None:
                     for name, buf in plots:
@@ -914,100 +917,10 @@ def train(
     # We're done -- used for hyperparameter tuning
     write_finished(log_dir)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--modeldir', default="models", type=str,
-        help="Directory for saving model files")
-    parser.add_argument('--logdir', default="logs", type=str,
-        help="Directory for saving log files")
-    parser.add_argument('--adapt', dest='adaptation', action='store_true',
-        help="Perform domain adaptation on the model")
-    parser.add_argument('--generalize', dest='generalization', action='store_true',
-        help="Perform domain generalization on the model")
-    parser.add_argument('--lstm', dest='lstm', action='store_true',
-        help="Use LSTM model")
-    parser.add_argument('--vrnn', dest='vrnn', action='store_true',
-        help="Use VRNN model")
-    parser.add_argument('--cnn', dest='cnn', action='store_true',
-        help="Use CNN model")
-    parser.add_argument('--resnet', dest='resnet', action='store_true',
-        help="Use resnet model")
-    parser.add_argument('--attention', dest='attention', action='store_true',
-        help="Use attention model")
-    parser.add_argument('--tcn', dest='tcn', action='store_true',
-        help="Use TCN model")
-    parser.add_argument('--flat', dest='flat', action='store_true',
-        help="Use flat model, i.e. only flatten input fed to feature extractor")
-    parser.add_argument('--fold', default=0, type=int,
-        help="What fold to use from the dataset files (default fold 0)")
-    parser.add_argument('--target', default="", type=str,
-        help="What dataset to use as the target (default none, i.e. blank)")
-    parser.add_argument('--features', default="al", type=str,
-        help="Whether to use \"al\", \"simple\", or \"simple2\" features (default \"al\")")
-    parser.add_argument('--units', default=50, type=int,
-        help="Number of LSTM hidden units and VRNN latent variable size (default 50)")
-    parser.add_argument('--layers', default=5, type=int,
-        help="Number of layers for the feature extractor (default 5)")
-    parser.add_argument('--steps', default=100000, type=int,
-        help="Number of training steps to run (default 100000)")
-    parser.add_argument('--batch', default=1024, type=int,
-        help="Batch size to use (default 1024, decrease if you run out of memory)")
-    parser.add_argument('--lr', default=0.0001, type=float,
-        help="Learning rate for training (default 0.0001)")
-    parser.add_argument('--lr-mult', default=1.0, type=float,
-        help="Multiplier for extra discriminator training learning rate (default 1.0)")
-    parser.add_argument('--dropout', default=0.95, type=float,
-        help="Keep probability for dropout (default 0.95)")
-    parser.add_argument('--gpu-mem', default=0.4, type=float,
-        help="Percentage of GPU memory to let TensorFlow use (default 0.4, max ~0.8)")
-    parser.add_argument('--model-steps', default=4000, type=int,
-        help="Save the model every so many steps (default 4000)")
-    parser.add_argument('--log-steps', default=500, type=int,
-        help="Log training losses and accuracy every so many steps (default 500)")
-    parser.add_argument('--log-steps-val', default=4000, type=int,
-        help="Log validation accuracy and AUC every so many steps (default 4000)")
-    parser.add_argument('--log-steps-extra', default=100000, type=int,
-        help="Log weights, plots, etc. every so many steps (default 100000)")
-    parser.add_argument('--max-examples', default=0, type=int,
-        help="Max number of examples to evaluate for validation (default 0, i.e. all)")
-    parser.add_argument('--max-plot-examples', default=100, type=int,
-        help="Max number of examples to use for plotting (default 100)")
-    parser.add_argument('--balance', dest='balance', action='store_true',
-        help="On high class imbalances weight the loss function (default)")
-    parser.add_argument('--no-balance', dest='balance', action='store_false',
-        help="Do not weight loss function with high class imbalances")
-    parser.add_argument('--augment', dest='augment', action='store_true',
-        help="Perform data augmentation (for simple2 dataset)")
-    parser.add_argument('--sample', dest='sample', action='store_true',
-        help="Only use a small amount of data for training/testing")
-    parser.add_argument('--test', dest='test', action='store_true',
-        help="Swap out validation data for real test data (debugging in tensorboard)")
-    parser.add_argument('--balance-pow', default=1.0, type=float,
-        help="For increased balancing, raise weights to a specified power (default 1.0)")
-    parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
-        help="Use a bidirectional RNN (when selected method includes an RNN)")
-    parser.add_argument('--feature-extractor', dest='feature_extractor', action='store_true',
-        help="Use a feature extractor before task classifier/domain predictor (default)")
-    parser.add_argument('--no-feature-extractor', dest='feature_extractor', action='store_false',
-        help="Do not use a feature extractor")
-    parser.add_argument('--debug', dest='debug', action='store_true',
-        help="Start new log/model/images rather than continuing from previous run")
-    parser.add_argument('--debug-num', default=-1, type=int,
-        help="Specify exact log/model/images number to use rather than incrementing from last. " \
-            +"(Don't pass both this and --debug at the same time.)")
-    parser.set_defaults(
-        lstm=False, vrnn=False, cnn=False, tcn=False, flat=False,
-        resnet=False, attention=False,
-        adaptation=False, generalization=False, balance=True, sample=False, test=False,
-        bidirectional=False, feature_extractor=True, debug=False)
-    args = parser.parse_args()
-
-    # TensorFlow will error if this happens
-    assert args.dropout != 0, "dropout cannot be zero"
-
+def main(argv):
     # Load datasets
     al_config = ALConfig()
-    tfrecord_config = TFRecordConfig(args.features)
+    tfrecord_config = TFRecordConfig(FLAGS.features)
     assert len(al_config.labels) == tfrecord_config.num_classes, \
         "al.config and tfrecord config disagree on the number of classes: " \
         +str(len(al_config.labels))+" vs. "+str(tfrecord_config.num_classes)
@@ -1015,14 +928,14 @@ if __name__ == '__main__':
     tfrecords_train_a, tfrecords_train_b, \
     tfrecords_valid_a, tfrecords_valid_b, \
     tfrecords_test_a, tfrecords_test_b = \
-        get_tfrecord_datasets(args.features, args.target, args.fold, args.sample)
+        get_tfrecord_datasets(FLAGS.features, FLAGS.target, FLAGS.fold, FLAGS.sample)
 
     # If testing, then we'll test on the real test set and add the validation data
     # to the training set. Otherwise, if not testing, then the "test" set is the
     # validation data -- e.g. for hyperparameter tuning we evaluate on validation
     # data and pick the best model, then set --test and train on train/valid sets
     # and evaluate on the real test set.
-    if args.test:
+    if FLAGS.test:
         tfrecords_train_a += tfrecords_valid_a
         tfrecords_train_b += tfrecords_valid_b
     else:
@@ -1030,73 +943,68 @@ if __name__ == '__main__':
         tfrecords_test_b = tfrecords_valid_b
 
     # Calculate class imbalance using labeled training data (i.e. from domain A)
-    if args.balance:
+    if FLAGS.balance:
         class_weights = calc_class_weights(tfrecords_train_a,
             tfrecord_config.x_dims, tfrecord_config.num_classes,
             tfrecord_config.num_domains,
-            args.balance_pow, args.gpu_mem, args.batch)
+            FLAGS.balance_pow, FLAGS.gpu_mem, FLAGS.batch)
     else:
         class_weights = 1.0
 
-    # Train with desired method
-    assert args.lstm + args.vrnn + args.cnn + args.tcn + args.flat + args.resnet \
-        + args.attention == 1, \
-        "Must specify exactly one method to run"
+    prefix = FLAGS.target+"-fold"+str(FLAGS.fold)+"-"
 
-    prefix = args.target+"-fold"+str(args.fold)+"-"
-
-    if args.lstm:
+    if FLAGS.model == "lstm":
         prefix += "lstm"
         model_func = build_lstm
-    elif args.vrnn:
+    elif FLAGS.model == "vrnn":
         prefix += "vrnn"
         model_func = build_vrnn
-    elif args.cnn:
+    elif FLAGS.model == "cnn":
         prefix += "cnn"
         model_func = build_cnn
-    elif args.resnet:
+    elif FLAGS.model == "resnet":
         prefix += "resnet"
         model_func = build_resnet
-    elif args.attention:
+    elif FLAGS.model == "attention":
         prefix += "attention"
         model_func = build_attention
-    elif args.tcn:
+    elif FLAGS.model == "tcn":
         prefix += "tcn"
         model_func = build_tcn
-    elif args.flat:
+    elif FLAGS.model == "flat":
         prefix += "flat"
         model_func = build_flat
 
-    assert not (args.adaptation and args.generalization), \
+    assert not (FLAGS.adaptation and FLAGS.generalization), \
         "Currently cannot enable both adaptation and generalization at the same time"
 
-    if args.adaptation:
+    if FLAGS.adaptation:
         prefix += "-da"
-    elif args.generalization:
+    elif FLAGS.generalization:
         prefix += "-dg"
 
     # Use the number specified on the command line (higher precidence than --debug)
-    if args.debug_num >= 0:
-        attempt = args.debug_num
+    if FLAGS.debug_num >= 0:
+        attempt = FLAGS.debug_num
         print("Debugging attempt:", attempt)
 
         prefix += "-"+str(attempt)
-        model_dir = os.path.join(args.modeldir, prefix)
-        log_dir = os.path.join(args.logdir, prefix)
+        model_dir = os.path.join(FLAGS.modeldir, prefix)
+        log_dir = os.path.join(FLAGS.logdir, prefix)
     # Find last one, increment number
-    elif args.debug:
-        attempt = last_modified_number(args.logdir, prefix+"*")
+    elif FLAGS.debug:
+        attempt = last_modified_number(FLAGS.logdir, prefix+"*")
         attempt = attempt+1 if attempt is not None else 1
         print("Debugging attempt:", attempt)
 
         prefix += "-"+str(attempt)
-        model_dir = os.path.join(args.modeldir, prefix)
-        log_dir = os.path.join(args.logdir, prefix)
+        model_dir = os.path.join(FLAGS.modeldir, prefix)
+        log_dir = os.path.join(FLAGS.logdir, prefix)
     # If no debugging modes, use the model and log directory with only the "prefix"
     # (even though it's not actually a prefix in this case, it's the whole name)
     else:
-        model_dir = os.path.join(args.modeldir, prefix)
-        log_dir = os.path.join(args.logdir, prefix)
+        model_dir = os.path.join(FLAGS.modeldir, prefix)
+        log_dir = os.path.join(FLAGS.logdir, prefix)
 
     train(tfrecord_config.num_features,
             tfrecord_config.num_classes,
@@ -1104,28 +1012,12 @@ if __name__ == '__main__':
             tfrecord_config.x_dims,
             tfrecords_train_a, tfrecords_train_b,
             tfrecords_test_a, tfrecords_test_b,
-            al_config,
+            config=al_config,
             model_func=model_func,
             model_dir=model_dir,
             log_dir=log_dir,
-            adaptation=args.adaptation,
-            generalization=args.generalization,
-            num_steps=args.steps,
-            learning_rate=args.lr,
-            lr_multiplier=args.lr_mult,
-            units=args.units,
-            layers=args.layers,
-            use_feature_extractor=args.feature_extractor,
-            batch_size=args.batch,
-            dropout_keep_prob=args.dropout,
-            model_save_steps=args.model_steps,
-            log_save_steps=args.log_steps,
-            log_validation_accuracy_steps=args.log_steps_val,
-            log_extra_save_steps=args.log_steps_extra,
             multi_class=False,
-            bidirectional=args.bidirectional,
-            class_weights=class_weights,
-            gpu_memory=args.gpu_mem,
-            max_examples=args.max_examples,
-            max_plot_examples=args.max_plot_examples,
-            data_augmentation=args.augment)
+            class_weights=class_weights)
+
+if __name__ == "__main__":
+    app.run(main)

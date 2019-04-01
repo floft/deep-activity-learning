@@ -12,51 +12,6 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-# Not-so-pretty code to feed data to TensorFlow.
-class IteratorInitializerHook(tf.estimator.SessionRunHook):
-    """Hook to initialise data iterator after Session is created.
-    https://medium.com/onfido-tech/higher-level-apis-in-tensorflow-67bfb602e6c0"""
-    def __init__(self):
-        super(IteratorInitializerHook, self).__init__()
-        self.iter_init_func = None
-
-    def after_create_session(self, sess, coord):
-        """Initialize the iterator after the session has been created."""
-        self.iter_init_func(sess)
-
-def _get_input_fn(features, labels, batch_size,
-        evaluation=False, buffer_size=10000, eval_shuffle_seed=0,
-        prefetch_buffer_size=1):
-    """ Load data from numpy arrays (requires more memory but less disk space) """
-    iter_init_hook = IteratorInitializerHook()
-
-    def input_fn():
-        # Input images using placeholders to reduce memory usage
-        features_placeholder = tf.compat.v1.placeholder(features.dtype, features.shape)
-        labels_placeholder = tf.compat.v1.placeholder(labels.dtype, labels.shape)
-        dataset = tf.data.Dataset.from_tensor_slices((features_placeholder, labels_placeholder))
-
-        if evaluation:
-            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed)
-        else:
-            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
-
-        dataset = dataset.batch(batch_size)
-
-        # Prefetch for speed up
-        # See: https://www.tensorflow.org/guide/performance/datasets
-        dataset = dataset.prefetch(prefetch_buffer_size)
-
-        iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
-        next_data_batch, next_label_batch = iterator.get_next()
-
-        # Need to initialize iterator after creating a session in the estimator
-        iter_init_hook.iter_init_func = lambda sess: sess.run(iterator.initializer,
-                feed_dict={features_placeholder: features, labels_placeholder: labels})
-
-        return next_data_batch, next_label_batch
-    return input_fn, iter_init_hook
-
 def tf_random_ones(x, mask, start, end):
     """
     Set from x[...,start:end] of each selected row (by the mask) to zero and then
@@ -78,7 +33,7 @@ def tf_random_ones(x, mask, start, end):
         sess = tf.Session()
         sess.run(x_augmented)
     """
-    num_rows = tf.shape(input=x)[0]
+    num_rows = tf.shape(x)[0]
     num_values = end - start
 
     # Zero the sensor values of those rows
@@ -184,11 +139,10 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
 
     return x
 
-def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes, num_domains,
+def load_tfrecords(filenames, batch_size, x_dims, num_classes, num_domains,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
         prefetch_buffer_size=1, data_augmentation=False):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
-    iter_init_hook = IteratorInitializerHook()
 
     # Create a description of the features
     # See: https://www.tensorflow.org/tutorials/load_data/tf-records
@@ -212,40 +166,27 @@ def _get_tfrecord_input_fn(filenames, batch_size, x_dims, num_classes, num_domai
 
         return x, y, domain
 
-    def input_fn():
-        # Ignore if no data
-        if len(filenames) == 0:
-            iter_init_hook.iter_init_func = lambda *args: None
-            return None, None, None
+    # Interleave the tfrecord files
+    files = tf.data.Dataset.from_tensor_slices(filenames)
+    dataset = files.interleave(
+        lambda x: tf.data.TFRecordDataset(x, compression_type='GZIP').prefetch(100),
+        cycle_length=len(filenames), block_length=1)
 
-        # Interleave the tfrecord files
-        files = tf.data.Dataset.from_tensor_slices(filenames)
-        dataset = files.interleave(
-            lambda x: tf.data.TFRecordDataset(x, compression_type='GZIP').prefetch(100),
-            cycle_length=len(filenames), block_length=1)
+    if count: # only count, so no need to shuffle
+        pass
+    elif evaluation: # don't repeat since we want to evaluate entire set
+        dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed)
+    else: # repeat, shuffle, and batch
+        dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
 
-        if count: # only count, so no need to shuffle
-            pass
-        elif evaluation: # don't repeat since we want to evaluate entire set
-            dataset = dataset.shuffle(buffer_size, seed=eval_shuffle_seed)
-        else: # repeat, shuffle, and batch
-            dataset = dataset.apply(tf.data.experimental.shuffle_and_repeat(buffer_size))
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.map(_parse_function)
 
-        dataset = dataset.batch(batch_size)
-        dataset = dataset.map(_parse_function)
+    # Prefetch for speed up
+    # See: https://www.tensorflow.org/guide/performance/datasets
+    dataset = dataset.prefetch(prefetch_buffer_size)
 
-        # Prefetch for speed up
-        # See: https://www.tensorflow.org/guide/performance/datasets
-        dataset = dataset.prefetch(prefetch_buffer_size)
-
-        iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
-        next_data_batch, next_label_batch, next_domain_batch = iterator.get_next()
-
-        # Need to initialize iterator after creating a session in the estimator
-        iter_init_hook.iter_init_func = lambda sess: sess.run(iterator.initializer)
-
-        return next_data_batch, next_label_batch, next_domain_batch
-    return input_fn, iter_init_hook
+    return dataset
 
 def one_hot(x, y, num_classes, index_one=False):
     """
@@ -338,15 +279,6 @@ def load_hdf5(filename):
     """
     return h5py.File(filename, "r")
 
-# def load_hdf5_all(filename):
-#     """
-#     Load x,y data from hdf5 file -- all data, not cross validation folds
-#     """
-#     d = h5py.File(filename, "r")
-#     features = np.array(d["features"])
-#     labels = np.array(d["labels"])
-#     return features, labels
-
 def load_single_fold(filename, fold=None):
     """ Get one fold from .hdf5 dataset file """
     data = load_hdf5(filename)
@@ -369,7 +301,7 @@ def load_single_fold(filename, fold=None):
 def load_data_home(feature_set="simple", dir_name="datasets", A="half1", B="hh117"):
     """
     Load hh/half1.hdf5 as domain A and hh/half2.hdf5 as domain B, use the last
-    fold for now -- TODO cross validation
+    fold for now
     """
     train_data_a, train_labels_a, \
     test_data_a, test_labels_a = \
@@ -474,53 +406,6 @@ def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="dat
     return tfrecords_train_a, tfrecords_train_b, \
         tfrecords_valid_a, tfrecords_valid_b, \
         tfrecords_test_a, tfrecords_test_b
-
-def calc_class_weights(filenames, x_dims, num_classes, num_domains, balance_pow=1.0,
-        gpu_mem=0.8, batch_size=1024):
-    # Since we're using a .tfrecord file, we need to load the data and sum
-    # how many instances of each class there are in batches
-    input_fn, input_hook = _get_tfrecord_input_fn(
-        filenames, batch_size, x_dims, num_classes, num_domains, count=True)
-    _, next_labels_batch, _ = input_fn()
-
-    total = 0
-    counts = np.zeros((num_classes,), dtype=np.int32)
-
-    # Increment total by number of examples in each batch
-    increment_total = tf.shape(input=next_labels_batch)[0]
-
-    # Since the labels are one-hot encoded, we can add it to the counts
-    # directly. For example, if we have 3 classes, our counts start out
-    # as [0 0 0], and if we have an example of class 0, i.e. [1 0 0],
-    # if we do [0 0 0]+[1 0 0]=[1 0 0], i.e. we've seen one instance of
-    # class 0 now.
-    # Note: first sum over examples, then we'll add this to "counts"
-    increment_counts = tf.reduce_sum(input_tensor=tf.cast(next_labels_batch, tf.int32), axis=0)
-
-    # Run on CPU since such a simple computation
-    #config=tf.ConfigProto(device_count={'GPU': 0})
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = gpu_mem
-
-    with tf.compat.v1.train.SingularMonitoredSession(hooks=[input_hook], config=config) as sess:
-        # Continue till we've looked at all the data
-        while True:
-            try:
-                inc_total, inc_counts = sess.run([increment_total, increment_counts])
-            except tf.errors.OutOfRangeError:
-                break
-
-            total += inc_total
-            counts += inc_counts
-
-    # We only created a graph here to look through the data, but we don't want to
-    # mess up the actual graph we'll use from this point on
-    tf.compat.v1.reset_default_graph()
-
-    class_weights = np.power(total/counts, balance_pow)
-    print("Class weights:", class_weights)
-
-    return class_weights
 
 class ALConfig:
     """

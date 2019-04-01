@@ -15,6 +15,7 @@ from sklearn.decomposition import PCA
 from absl import app
 from absl import flags
 from absl import logging
+from tensorflow.python.framework import config as tfconfig
 
 # Make sure matplotlib is not interactive
 import matplotlib as mpl
@@ -22,11 +23,8 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 from plot import plot_embedding, plot_random_time_series, plot_real_time_series
-from model import build_lstm, build_vrnn, build_cnn, build_tcn, build_flat, \
-    build_resnet, build_attention
-from load_data import IteratorInitializerHook, _get_tfrecord_input_fn, \
-    domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig, \
-    calc_class_weights
+from model import make_model
+from load_data import load_tfrecords, domain_labels, get_tfrecord_datasets, ALConfig, TFRecordConfig
 from eval_utils import get_files_to_keep, get_step_from_log, delete_models_except
 from file_utils import last_modified_number, get_best_valid_accuracy, \
     write_best_valid_accuracy, write_finished
@@ -37,17 +35,13 @@ flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
 flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
 flags.DEFINE_boolean("adapt", False, "Perform domain adaptation on the model")
 flags.DEFINE_boolean("generalize", False, "Perform domain generalization on the model")
-flags.DEFINE_enum("model", None, ["flat"], "What model type to use")
 flags.DEFINE_integer("fold", 0, "What fold to use from the dataset files")
 flags.DEFINE_string("target", "", "What dataset to use as the target (default none, i.e. blank)")
 flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
-flags.DEFINE_integer("units", 50, "Number of LSTM hidden units and VRNN latent variable size")
-flags.DEFINE_integer("layers", 5, "Number of layers for the feature extractor")
 flags.DEFINE_integer("steps", 100000, "Number of training steps to run")
 flags.DEFINE_integer("batch", 1024, "Batch size to use")
 flags.DEFINE_float("lr", 0.0001, "Learning rate for training")
 flags.DEFINE_float("lr_mult", 1.0, "Multiplier for extra discriminator training learning rate")
-flags.DEFINE_float("dropout", 0.95, "Keep probability for dropout")
 flags.DEFINE_float("gpu_mem", 0.4, "Percentage of GPU memory to let TensorFlow use")
 flags.DEFINE_integer("model_steps", 4000, "Save the model every so many steps")
 flags.DEFINE_integer("log_steps", 500, "Log training losses and accuracy every so many steps")
@@ -55,21 +49,15 @@ flags.DEFINE_integer("log_steps_val", 4000, "Log validation accuracy and AUC eve
 flags.DEFINE_integer("log_steps_extra", 100000, "Log weights, plots, etc. every so many steps")
 flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
 flags.DEFINE_integer("max_plot_examples", 1000, "Max number of examples to use for plotting")
-flags.DEFINE_boolean("balance", True, "On high class imbalances weight the loss function")
 flags.DEFINE_boolean("augment", False, "Perform data augmentation (for simple2 dataset)")
 flags.DEFINE_boolean("sample", False, "Only use a small amount of data for training/testing")
 flags.DEFINE_boolean("test", False, "Swap out validation data for real test data (debugging in tensorboard)")
-flags.DEFINE_float("balance_pow", 1.0, "For increased balancing, raise weights to a specified power")
 flags.DEFINE_boolean("bidirectional", False, "Use a bidirectional RNN (when selected method includes an RNN)")
 flags.DEFINE_boolean("feature_extractor", True, "Use a feature extractor before task classifier/domain predictor")
 flags.DEFINE_float("min_domain_accuracy", 0.5, "If generalize, min domain classifier accuracy")
 flags.DEFINE_float("max_domain_iters", 10, "If generalize, max domain classifier training iterations")
 flags.DEFINE_boolean("debug", False, "Start new log/model/images rather than continuing from previous run")
 flags.DEFINE_integer("debug_num", -1, "Specify exact log/model/images number to use rather than incrementing from last. (Don't pass both this and --debug at the same time.)")
-
-flags.mark_flag_as_required("model")
-flags.register_validator("dropout", lambda v: v != 0, message="dropout cannot be zero")
-
 
 def update_metrics_on_val(sess,
     eval_input_hook_a, eval_input_hook_b,
@@ -467,7 +455,7 @@ def opt_with_summ(optimizer, loss, var_list=None):
 
     return update_step, summaries
 
-class RemoveOldCheckpointSaverListener(tf.estimator.CheckpointSaverListener):
+class RemoveOldCheckpoints:
     """
     Remove checkpoints that are not the best or the last one so we don't waste
     tons of disk space
@@ -475,9 +463,8 @@ class RemoveOldCheckpointSaverListener(tf.estimator.CheckpointSaverListener):
     def __init__(self, log_dir, model_dir):
         self.log_dir = log_dir
         self.model_dir = model_dir
-        super().__init__()
 
-    def before_save(self, session, global_step_value):
+    def before_save(self,):
         """
         Do this right before saving, to make sure we don't mistakingly delete
         the one we just saved in after_save. This will in effect keep the last
@@ -488,7 +475,7 @@ class RemoveOldCheckpointSaverListener(tf.estimator.CheckpointSaverListener):
         best, last = get_files_to_keep(self.log_dir, warn=False)
         delete_models_except(self.model_dir, best, last)
 
-    def after_save(self, session, global_step_value):
+    def after_save(self):
         """
         Keep track of the best accuracy we've gotten on the validation data.
         This file is used for automated hyperparameter tuning.
@@ -508,14 +495,85 @@ class RemoveOldCheckpointSaverListener(tf.estimator.CheckpointSaverListener):
             if previous_best is None or best_accuracy > previous_best:
                 write_best_valid_accuracy(self.log_dir, best_accuracy)
 
+@tf.function
+def train_step(train_data_a_iter, train_data_b_iter, model):
+    """ Compiled training step that we call many times """
+
+    # Get data for this iteration
+    data_batch_a, labels_batch_a, domains_batch_a = next(train_data_a_iter)
+    data_batch_b, labels_batch_b, domains_batch_b = next(train_data_b_iter)
+
+    with tf.GradientTape() as tape_all, tf.GradientTape() as tape_discrim:
+
+        if FLAGS.adaptation:
+            # Concatenate for adaptation - concatenate source labels with all-zero
+            # labels for target since we can't use the target labels during
+            # unsupervised domain adaptation
+            combined_x = np.concatenate((data_batch_a, data_batch_b), axis=0)
+            combined_labels = np.concatenate((labels_batch_a, np.zeros(labels_batch_b.shape)), axis=0)
+            combined_domain = np.concatenate((source_domain, target_domain), axis=0)
+
+            # Train everything in one step and domain more next. This seemed
+            # to work better for me than just nondomain then domain, though
+            # it seems likely the results would be similar.
+            sess.run(train_all, feed_dict={
+                x: combined_x, y: combined_labels, domain: combined_domain,
+                grl_lambda: grl_lambda_value,
+                keep_prob: FLAGS.dropout, lr: lr_value, training: True
+            })
+
+            y_pred, domain_pred = model(combined_x, grl_lambda_value)
+
+            # Update domain more
+            #
+            # Depending on the num_steps, your learning rate, etc. it may be
+            # beneficial to have a different learning rate here -- hence the
+            # lr_multiplier option. This may also depend on your dataset though.
+            sess.run(train_domain, feed_dict={
+                x: combined_x, y: combined_labels, domain: combined_domain,
+                grl_lambda: 0.0,
+                keep_prob: FLAGS.dropout, lr: FLAGS.lr_mult*lr_value, training: True
+            })
+
+        elif FLAGS.generalization:
+            sess.run(train_all, feed_dict={
+                x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
+                grl_lambda: grl_lambda_value,
+                keep_prob: FLAGS.dropout, lr: lr_value, training: True
+            })
+
+            # Update discriminator till it's accurate enough
+            for j in range(FLAGS.max_domain_iters):
+                feed_dict = {
+                    x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
+                    grl_lambda: 0.0,
+                    keep_prob: FLAGS.dropout, lr: FLAGS.lr_mult*lr_value, training: True
+                }
+                sess.run(train_domain, feed_dict=feed_dict)
+
+                # Break if high enough accuracy
+                domain_acc = sess.run(domain_accuracy, feed_dict=feed_dict)
+
+                if domain_acc > FLAGS.min_domain_accuracy:
+                    break
+
+            # For debugging, print occasionally
+            if i%1000 == 0:
+                print("Iteration", i, "Domain iters", j, "domain acc", domain_acc)
+        else:
+            # Train task classifier on source domain to be correct
+            sess.run(train_notdomain, feed_dict={
+                x: data_batch_a, y: labels_batch_a,
+                keep_prob: FLAGS.dropout, lr: lr_value, training: True
+            })
+
 def train(
         num_features, num_classes, num_domains, x_dims,
         tfrecords_train_a, tfrecords_train_b,
         tfrecords_test_a, tfrecords_test_b,
         config,
         model_dir, log_dir,
-        multi_class=False,
-        class_weights=1.0):
+        multi_class=False):
 
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
@@ -528,30 +586,16 @@ def train(
         batch_size = batch_size // 2
 
     # Input training data
-    with tf.compat.v1.variable_scope("training_data_a"):
-        input_fn_a, input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_train_a, batch_size, x_dims, num_classes, num_domains,
-            data_augmentation=FLAGS.augment)
-        next_data_batch_a, next_labels_batch_a, next_domains_batch_a = input_fn_a()
-    with tf.compat.v1.variable_scope("training_data_b"):
-        input_fn_b, input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_train_b, batch_size, x_dims, num_classes, num_domains,
-            data_augmentation=FLAGS.augment)
-        next_data_batch_b, next_labels_batch_b, next_domains_batch_b = input_fn_b()
+    train_data_a_iter = iter(load_tfrecords(tfrecords_train_a, batch_size, x_dims,
+        num_classes, num_domains, data_augmentation=FLAGS.augment))
+    train_data_b_iter = iter(load_tfrecords(tfrecords_train_b, batch_size, x_dims,
+        num_classes, num_domains, data_augmentation=FLAGS.augment))
 
     # Load all the test data in one batch
-    with tf.compat.v1.variable_scope("evaluation_data_a"):
-        eval_input_fn_a, eval_input_hook_a = _get_tfrecord_input_fn(
-            tfrecords_test_a, batch_size, x_dims, num_classes, num_domains,
-            evaluation=True)
-        next_data_batch_test_a, next_labels_batch_test_a, \
-            next_domains_batch_test_a = eval_input_fn_a()
-    with tf.compat.v1.variable_scope("evaluation_data_b"):
-        eval_input_fn_b, eval_input_hook_b = _get_tfrecord_input_fn(
-            tfrecords_test_b, batch_size, x_dims, num_classes, num_domains,
-            evaluation=True)
-        next_data_batch_test_b, next_labels_batch_test_b, \
-            next_domains_batch_test_b = eval_input_fn_b()
+    eval_data_a = load_tfrecords(tfrecords_test_a, batch_size, x_dims,
+        num_classes, num_domains, evaluation=True)
+    eval_data_b = load_tfrecords(tfrecords_test_b, batch_size, x_dims,
+        num_classes, num_domains, evaluation=True)
 
     # Above we needed to load with the right number of num_domains, but for
     # adaptation, we only want two: source and target. Default for any
@@ -559,36 +603,14 @@ def train(
     if not FLAGS.generalization:
         num_domains = 2
 
-    # Inputs
-    keep_prob = tf.compat.v1.placeholder_with_default(1.0, shape=(), name='keep_prob') # for dropout
-    x = tf.compat.v1.placeholder(tf.float32, [None]+x_dims, name='x') # input data
-    domain = tf.compat.v1.placeholder(tf.float32, [None, num_domains], name='domain') # which domain
-    y = tf.compat.v1.placeholder(tf.float32, [None, num_classes], name='y') # class 1, 2, etc. one-hot
-    training = tf.compat.v1.placeholder(tf.bool, name='training') # whether we're training (batch norm)
-    grl_lambda = tf.compat.v1.placeholder_with_default(1.0, shape=(), name='grl_lambda') # gradient multiplier for GRL
-    lr = tf.compat.v1.placeholder(tf.float32, (), name='learning_rate')
+    # Variables
+    global_step = tf.Variable(0, name="global_step", trainable=False)
 
     # Source domain will be [[1,0], [1,0], ...] and target domain [[0,1], [0,1], ...]
     source_domain = domain_labels(0, batch_size, num_domains)
     target_domain = domain_labels(1, batch_size, num_domains)
 
-    if FLAGS.model == "flat":
-        model_func = build_flat
-
-    # Model, loss, feature extractor output -- e.g. using build_lstm or build_vrnn
-    # Optionally also returns additional summaries to log, e.g. loss components
-    task_classifier, domain_classifier, total_loss, \
-    feature_extractor, model_summaries, extra_model_outputs = \
-        model_func(x, y, domain, grl_lambda, keep_prob, training,
-            num_classes, num_domains, num_features, FLAGS.adaptation, FLAGS.generalization, FLAGS.units, FLAGS.layers,
-            multi_class, FLAGS.bidirectional, class_weights, x_dims, FLAGS.feature_extractor)
-
-    # Get variables of model - needed if we train in two steps
-    variables = tf.compat.v1.trainable_variables()
-    model_vars = [v for v in variables if '_model' in v.name]
-    feature_extractor_vars = [v for v in variables if 'feature_extractor' in v.name]
-    task_classifier_vars = [v for v in variables if 'task_classifier' in v.name]
-    domain_classifier_vars = [v for v in variables if 'domain_classifier' in v.name]
+    model = make_model(x_dims, num_classes, num_domains, grl_lambda, FLAGS.lr, training)
 
     # If the discriminator has lower than a certain accuracy on classifying which
     # domain a feature output was from, then we'll train that and skip training
@@ -601,318 +623,176 @@ def train(
                 tf.argmax(input=domain_classifier, axis=-1)),
             tf.float32))
 
-    # Optimizer - update ops for batch norm layers
-    with tf.compat.v1.variable_scope("optimizer"), \
-        tf.control_dependencies(tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.UPDATE_OPS)):
-        optimizer = tf.compat.v1.train.AdamOptimizer(lr)
-        train_all = optimizer.minimize(total_loss)
-
-        train_notdomain = optimizer.minimize(total_loss,
-            var_list=model_vars+feature_extractor_vars+task_classifier_vars)
-
-        if FLAGS.adaptation or FLAGS.generalization:
-            train_domain = optimizer.minimize(total_loss,
-                var_list=domain_classifier_vars)
-
-    # Summaries - training and evaluation for both domains A and B
-    #
-    # Most will be using tf.metrics... as updatable/resetable. Thus, we'll first
-    # run reset_metrics followed by the update_metrics_{a,b} (optionally over
-    # multiple batches, e.g. if for the entire validation dataset). Then we
-    # run and log the summaries.
-    train_a_summs = [tf.compat.v1.summary.scalar("loss/total_loss", total_loss)]
-
-    reset_a, update_metrics_a, summs, _ = metric_summaries(
-        "source", y, task_classifier, domain, domain_classifier,
-        num_classes, multi_class, config)
-    train_a_summs += summs[0]
-    val_a_summs = summs[1]
-
-    reset_b, update_metrics_b, summs, _ = metric_summaries(
-        "target", y, task_classifier, domain, domain_classifier,
-        num_classes, multi_class, config)
-    train_b_summs = summs[0]
-    val_b_summs = summs[1]
-
-    reset_metrics = reset_a + reset_b
-
-    training_summaries_a = tf.compat.v1.summary.merge(train_a_summs)
-    training_summaries_extra_a = tf.compat.v1.summary.merge(model_summaries)
-    training_summaries_b = tf.compat.v1.summary.merge(train_b_summs)
-    validation_summaries_a = tf.compat.v1.summary.merge(val_a_summs)
-    validation_summaries_b = tf.compat.v1.summary.merge(val_b_summs)
-
-    # Allow restoring global_step from past run
-    global_step = tf.Variable(0, name="global_step", trainable=False)
-    inc_global_step = tf.compat.v1.assign_add(global_step, 1, name='incr_global_step')
-
     # Keep track of state and summaries
-    saver = tf.compat.v1.train.Saver(max_to_keep=FLAGS.steps)
-    saver_listener = RemoveOldCheckpointSaverListener(log_dir, model_dir)
-    saver_hook = tf.estimator.CheckpointSaverHook(model_dir,
-        save_steps=FLAGS.model_steps, saver=saver, listeners=[saver_listener])
     writer = tf.compat.v1.summary.FileWriter(log_dir)
 
-    # Allow running two at once
+    checkpoint = tf.train.Checkpoint(
+        generator_optimizer=generator_optimizer,
+        discriminator_optimizer=discriminator_optimizer,
+        generator=generator,
+        discriminator=discriminator)
+    checkpoint.restore(tf.train.latest_checkpoint(model_dir))
+
+    remove_old_checkpoints = RemoveOldCheckpoints(log_dir, model_dir)
+
+    # Allow running multiple at once
     # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_mem
+    # https://github.com/tensorflow/tensorflow/issues/25138
+    tfconfig.set_gpu_per_process_memory_fraction(FLAGS.gpu_mem)
 
     # Start training
-    with tf.compat.v1.train.SingularMonitoredSession(checkpoint_dir=model_dir, hooks=[
-                input_hook_a, input_hook_b,
-                saver_hook
-            ], config=config) as sess:
+    for i in range(global_step, FLAGS.steps+1):
+        t = time.time()
 
-        for i in range(sess.run(global_step),FLAGS.steps+1):
-            if i == 0:
-                writer.add_graph(sess.graph)
+        if i == 0:
+            writer.add_graph(sess.graph)
 
-            # GRL schedule and learning rate schedule from DANN paper
-            grl_lambda_value = 2/(1+np.exp(-10*(i/(FLAGS.steps+1))))-1
-            #lr_value = 0.001/(1.0+10*i/(num_steps+1))**0.75
-            lr_value = FLAGS.lr
+        # GRL schedule and learning rate schedule from DANN paper
+        grl_lambda_value = 2/(1+np.exp(-10*(i/(FLAGS.steps+1))))-1
+
+        # training step
+        train_step(train_data_a_iter, train_data_b_iter, model)
+
+        t = time.time() - t
+
+        if i%FLAGS.log_save_steps == 0:
+            # Log the step time
+            summ = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="step_time/model_train", simple_value=t)
+            ])
+            writer.add_summary(summ, step)
 
             t = time.time()
-            step = sess.run(inc_global_step)
 
-            # Get data for this iteration
+            if FLAGS.generalization:
+                domains_a = domains_batch_a
+
+                if next_data_batch_b is not None:
+                    domains_b = domains_batch_b
+            else:
+                domains_a = source_domain
+
+                if next_data_batch_b is not None:
+                    domains_b = target_domain
+
+            # Log summaries run on the training data
+            #
+            # Reset metrics, update metrics, then generate summaries
+            feed_dict = {
+                x: data_batch_a, y: labels_batch_a, domain: domains_a,
+                keep_prob: 1.0, training: False
+            }
+            sess.run(reset_metrics)
+            sess.run(update_metrics_a, feed_dict=feed_dict)
+            summ = sess.run(training_summaries_a, feed_dict=feed_dict)
+            writer.add_summary(summ, step)
+
             if next_data_batch_b is not None:
-                data_batch_a, labels_batch_a, domains_batch_a, \
-                data_batch_b, labels_batch_b, domains_batch_b = sess.run([
-                    next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
-                    next_data_batch_b, next_labels_batch_b, next_domains_batch_b,
-                ])
-            else:
-                data_batch_a, labels_batch_a, domains_batch_a = sess.run([
-                    next_data_batch_a, next_labels_batch_a, next_domains_batch_a,
-                ])
-
-            if FLAGS.adaptation:
-                assert next_data_batch_b is not None, \
-                    "Cannot perform adaptation without a domain B dataset"
-
-                # Concatenate for adaptation - concatenate source labels with all-zero
-                # labels for target since we can't use the target labels during
-                # unsupervised domain adaptation
-                combined_x = np.concatenate((data_batch_a, data_batch_b), axis=0)
-                combined_labels = np.concatenate((labels_batch_a, np.zeros(labels_batch_b.shape)), axis=0)
-                combined_domain = np.concatenate((source_domain, target_domain), axis=0)
-
-                # Train everything in one step and domain more next. This seemed
-                # to work better for me than just nondomain then domain, though
-                # it seems likely the results would be similar.
-                sess.run(train_all, feed_dict={
-                    x: combined_x, y: combined_labels, domain: combined_domain,
-                    grl_lambda: grl_lambda_value,
-                    keep_prob: FLAGS.dropout, lr: lr_value, training: True
-                })
-
-                # Update domain more
-                #
-                # Depending on the num_steps, your learning rate, etc. it may be
-                # beneficial to have a different learning rate here -- hence the
-                # lr_multiplier option. This may also depend on your dataset though.
-                sess.run(train_domain, feed_dict={
-                    x: combined_x, y: combined_labels, domain: combined_domain,
-                    grl_lambda: 0.0,
-                    keep_prob: FLAGS.dropout, lr: FLAGS.lr_mult*lr_value, training: True
-                })
-
-                # Train only the domain predictor / discriminator
-                # feed_dict={
-                #     x: combined_x, domain: combined_domain,
-                #     keep_prob: dropout_keep_prob, lr: lr_multiplier*lr_value, training: True
-                # }
-                # sess.run(train_domain, feed_dict=feed_dict)
-                # domain_acc = sess.run(domain_accuracy, feed_dict=feed_dict)
-
-                # print("Iteration", i, "domain acc", domain_acc)
-
-                # # Don't update the rest of the model if the discriminator is
-                # # still really bad -- otherwise its gradient may not be helpful
-                # # for adaptation
-                # if domain_acc > min_domain_accuracy:
-                #     print("    Training rest of model")
-                #     # Train everything except the domain predictor / discriminator but
-                #     # flip labels rather than using GRL (i.e. set lambda=-1)
-                #     sess.run(train_notdomain, feed_dict={
-                #         x: combined_x, y: combined_labels, domain: combined_domain_flip,
-                #         keep_prob: dropout_keep_prob, lr: lr_value, training: True
-                #     })
-            elif FLAGS.generalization:
-                sess.run(train_all, feed_dict={
-                    x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
-                    grl_lambda: grl_lambda_value,
-                    keep_prob: FLAGS.dropout, lr: lr_value, training: True
-                })
-
-                # Update discriminator till it's accurate enough
-                for j in range(FLAGS.max_domain_iters):
-                    feed_dict = {
-                        x: data_batch_a, y: labels_batch_a, domain: domains_batch_a,
-                        grl_lambda: 0.0,
-                        keep_prob: FLAGS.dropout, lr: FLAGS.lr_mult*lr_value, training: True
-                    }
-                    sess.run(train_domain, feed_dict=feed_dict)
-
-                    # Break if high enough accuracy
-                    domain_acc = sess.run(domain_accuracy, feed_dict=feed_dict)
-
-                    if domain_acc > FLAGS.min_domain_accuracy:
-                        break
-
-                # For debugging, print occasionally
-                if i%1000 == 0:
-                    print("Iteration", i, "Domain iters", j, "domain acc", domain_acc)
-            else:
-                # Train task classifier on source domain to be correct
-                sess.run(train_notdomain, feed_dict={
-                    x: data_batch_a, y: labels_batch_a,
-                    keep_prob: FLAGS.dropout, lr: lr_value, training: True
-                })
+                feed_dict = {
+                    x: data_batch_b, y: labels_batch_b, domain: domains_b,
+                    keep_prob: 1.0, training: False
+                }
+                sess.run(update_metrics_b, feed_dict=feed_dict)
+                summ = sess.run(training_summaries_b, feed_dict=feed_dict)
+                writer.add_summary(summ, step)
 
             t = time.time() - t
 
-            if i%FLAGS.log_save_steps == 0:
-                # Log the step time
-                summ = tf.compat.v1.Summary(value=[
-                    tf.compat.v1.Summary.Value(tag="step_time/model_train", simple_value=t)
-                ])
-                writer.add_summary(summ, step)
+            # Log the time to update metrics
+            summ = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="step_time/metrics/training", simple_value=t)
+            ])
+            writer.add_summary(summ, step)
 
-                t = time.time()
+        # Log validation accuracy/AUC less frequently
+        if i%FLAGS.log_validation_accuracy_steps == 0:
+            t = time.time()
 
-                if FLAGS.generalization:
-                    domains_a = domains_batch_a
+            # Evaluation accuracy, AUC, rates, etc.
+            sess.run(reset_metrics)
+            update_metrics_on_val(sess,
+                eval_input_hook_a, eval_input_hook_b,
+                next_data_batch_test_a, next_labels_batch_test_a,
+                next_data_batch_test_b, next_labels_batch_test_b,
+                next_domains_batch_test_a, next_domains_batch_test_b,
+                x, y, domain, keep_prob, training, num_domains, FLAGS.generalization,
+                batch_size, update_metrics_a, update_metrics_b,
+                FLAGS.max_examples)
 
-                    if next_data_batch_b is not None:
-                        domains_b = domains_batch_b
-                else:
-                    domains_a = source_domain
+            # Add the summaries about rates that were updated above in the
+            # evaluation function (via update_metrics_* lists)
+            summs_a, summs_b = sess.run([
+                validation_summaries_a, validation_summaries_b])
+            writer.add_summary(summs_a, step)
 
-                    if next_data_batch_b is not None:
-                        domains_b = target_domain
+            if next_data_batch_b is not None:
+                writer.add_summary(summs_b, step)
 
-                # Log summaries run on the training data
-                #
-                # Reset metrics, update metrics, then generate summaries
-                feed_dict = {
-                    x: data_batch_a, y: labels_batch_a, domain: domains_a,
-                    keep_prob: 1.0, training: False
-                }
-                sess.run(reset_metrics)
-                sess.run(update_metrics_a, feed_dict=feed_dict)
-                summ = sess.run(training_summaries_a, feed_dict=feed_dict)
-                writer.add_summary(summ, step)
+            t = time.time() - t
 
-                if next_data_batch_b is not None:
-                    feed_dict = {
-                        x: data_batch_b, y: labels_batch_b, domain: domains_b,
-                        keep_prob: 1.0, training: False
-                    }
-                    sess.run(update_metrics_b, feed_dict=feed_dict)
-                    summ = sess.run(training_summaries_b, feed_dict=feed_dict)
+            # Log the time to update metrics
+            summ = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="step_time/metrics/validation", simple_value=t)
+            ])
+            writer.add_summary(summ, step)
+
+        # Larger stuff like weights and t-SNE plots occasionally
+        if i%FLAGS.log_extra_save_steps == 0:
+            t = time.time()
+
+            if FLAGS.generalization:
+                domains_a = domains_batch_a
+            else:
+                domains_a = source_domain
+
+            # Training weights
+            summ = sess.run(training_summaries_extra_a, feed_dict={
+                x: data_batch_a, y: labels_batch_a, domain: domains_a,
+                keep_prob: 1.0, training: False
+            })
+            writer.add_summary(summ, step)
+
+            t = time.time() - t
+
+            # Log the time to update metrics
+            summ = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="step_time/extra", simple_value=t)
+            ])
+            writer.add_summary(summ, step)
+
+            t = time.time()
+
+            # t-SNE, PCA, and VRNN reconstruction plots
+            first_step = i==0 # only plot real ones once
+            plots = evaluation_plots(sess,
+                eval_input_hook_a, eval_input_hook_b,
+                next_data_batch_test_a, next_labels_batch_test_a,
+                next_data_batch_test_b, next_labels_batch_test_b,
+                feature_extractor, x, keep_prob, training, FLAGS.adaptation,
+                extra_model_outputs, num_features, first_step, config,
+                FLAGS.max_plot_examples)
+
+            if plots is not None:
+                for name, buf in plots:
+                    # See: https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
+                    plot = tf.compat.v1.Summary.Image(encoded_image_string=buf)
+                    summ = tf.compat.v1.Summary(value=[tf.compat.v1.Summary.Value(
+                        tag=name, image=plot)])
                     writer.add_summary(summ, step)
 
-                t = time.time() - t
+            t = time.time() - t
 
-                # Log the time to update metrics
-                summ = tf.compat.v1.Summary(value=[
-                    tf.compat.v1.Summary.Value(tag="step_time/metrics/training", simple_value=t)
-                ])
-                writer.add_summary(summ, step)
+            # Log the time to update metrics
+            summ = tf.compat.v1.Summary(value=[
+                tf.compat.v1.Summary.Value(tag="step_time/plots", simple_value=t)
+            ])
+            writer.add_summary(summ, step)
 
-            # Log validation accuracy/AUC less frequently
-            if i%FLAGS.log_validation_accuracy_steps == 0:
-                t = time.time()
-
-                # Evaluation accuracy, AUC, rates, etc.
-                sess.run(reset_metrics)
-                update_metrics_on_val(sess,
-                    eval_input_hook_a, eval_input_hook_b,
-                    next_data_batch_test_a, next_labels_batch_test_a,
-                    next_data_batch_test_b, next_labels_batch_test_b,
-                    next_domains_batch_test_a, next_domains_batch_test_b,
-                    x, y, domain, keep_prob, training, num_domains, FLAGS.generalization,
-                    batch_size, update_metrics_a, update_metrics_b,
-                    FLAGS.max_examples)
-
-                # Add the summaries about rates that were updated above in the
-                # evaluation function (via update_metrics_* lists)
-                summs_a, summs_b = sess.run([
-                    validation_summaries_a, validation_summaries_b])
-                writer.add_summary(summs_a, step)
-
-                if next_data_batch_b is not None:
-                    writer.add_summary(summs_b, step)
-
-                t = time.time() - t
-
-                # Log the time to update metrics
-                summ = tf.compat.v1.Summary(value=[
-                    tf.compat.v1.Summary.Value(tag="step_time/metrics/validation", simple_value=t)
-                ])
-                writer.add_summary(summ, step)
-
-            # Larger stuff like weights and t-SNE plots occasionally
-            if i%FLAGS.log_extra_save_steps == 0:
-                t = time.time()
-
-                if FLAGS.generalization:
-                    domains_a = domains_batch_a
-                else:
-                    domains_a = source_domain
-
-                # Training weights
-                summ = sess.run(training_summaries_extra_a, feed_dict={
-                    x: data_batch_a, y: labels_batch_a, domain: domains_a,
-                    keep_prob: 1.0, training: False
-                })
-                writer.add_summary(summ, step)
-
-                t = time.time() - t
-
-                # Log the time to update metrics
-                summ = tf.compat.v1.Summary(value=[
-                    tf.compat.v1.Summary.Value(tag="step_time/extra", simple_value=t)
-                ])
-                writer.add_summary(summ, step)
-
-                t = time.time()
-
-                # t-SNE, PCA, and VRNN reconstruction plots
-                first_step = i==0 # only plot real ones once
-                plots = evaluation_plots(sess,
-                    eval_input_hook_a, eval_input_hook_b,
-                    next_data_batch_test_a, next_labels_batch_test_a,
-                    next_data_batch_test_b, next_labels_batch_test_b,
-                    feature_extractor, x, keep_prob, training, FLAGS.adaptation,
-                    extra_model_outputs, num_features, first_step, config,
-                    FLAGS.max_plot_examples)
-
-                if plots is not None:
-                    for name, buf in plots:
-                        # See: https://gist.github.com/gyglim/1f8dfb1b5c82627ae3efcfbbadb9f514
-                        plot = tf.compat.v1.Summary.Image(encoded_image_string=buf)
-                        summ = tf.compat.v1.Summary(value=[tf.compat.v1.Summary.Value(
-                            tag=name, image=plot)])
-                        writer.add_summary(summ, step)
-
-                t = time.time() - t
-
-                # Log the time to update metrics
-                summ = tf.compat.v1.Summary(value=[
-                    tf.compat.v1.Summary.Value(tag="step_time/plots", simple_value=t)
-                ])
-                writer.add_summary(summ, step)
-
-                # Make sure we write to disk before too long so we can monitor live in
-                # TensorBoard. If it's too delayed we won't be able to detect problems
-                # for a long time.
-                writer.flush()
-
-        writer.flush()
+        # Checkpoints
+        if i%FLAGS.model_steps == 0:
+            remove_old_checkpoints.before_save()
+            checkpoint.save(file_prefix=model_dir)
+            remove_old_checkpoints.after_save()
 
     # We're done -- used for hyperparameter tuning
     write_finished(log_dir)
@@ -941,15 +821,6 @@ def main(argv):
     else:
         tfrecords_test_a = tfrecords_valid_a
         tfrecords_test_b = tfrecords_valid_b
-
-    # Calculate class imbalance using labeled training data (i.e. from domain A)
-    if FLAGS.balance:
-        class_weights = calc_class_weights(tfrecords_train_a,
-            tfrecord_config.x_dims, tfrecord_config.num_classes,
-            tfrecord_config.num_domains,
-            FLAGS.balance_pow, FLAGS.gpu_mem, FLAGS.batch)
-    else:
-        class_weights = 1.0
 
     prefix = FLAGS.target+"-fold"+str(FLAGS.fold)+"-"+FLAGS.model
 
@@ -993,8 +864,7 @@ def main(argv):
             config=al_config,
             model_dir=model_dir,
             log_dir=log_dir,
-            multi_class=False,
-            class_weights=class_weights)
+            multi_class=False)
 
 if __name__ == "__main__":
     app.run(main)

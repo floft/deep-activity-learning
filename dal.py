@@ -205,7 +205,10 @@ def train(
         t = time.time()
         train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
             source_domain, target_domain)
+        global_step.assign_add(1)
         t = time.time() - t
+
+        print("step", int(global_step), "took", t, "seconds")
 
         # Checkpoints
         if i%FLAGS.model_steps == 0:
@@ -219,6 +222,10 @@ def train(
 
         if i%FLAGS.log_val_steps == 0:
             metrics.test(model, eval_data_a, eval_data_b, global_step)
+
+        writer.flush()
+
+    writer.flush()
 
     # We're done -- used for hyperparameter tuning
     write_finished(log_dir)

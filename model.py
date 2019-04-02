@@ -158,6 +158,7 @@ class FlatModel(BaseModel):
         net = self.pre(inputs, training=training)
         return super().call(net, grl_lambda, training)
 
+@tf.function
 def task_loss(y_true, y_pred, training):
     """
     Compute loss on the outputs of the task classifier
@@ -182,11 +183,13 @@ def task_loss(y_true, y_pred, training):
 
     return cce(y_true, y_pred)
 
+@tf.function
 def domain_loss(y_true, y_pred, training):
     """ Compute loss on the outputs of the domain classifier """
     cce = tf.keras.losses.CategoricalCrossentropy()
     return cce(y_true, y_pred)
 
+@tf.function
 def compute_accuracy(y_true, y_pred):
     return tf.reduce_mean(input_tensor=tf.cast(tf.equal(
             tf.argmax(y_true, axis=-1),

@@ -139,7 +139,7 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
 
     return x
 
-def load_tfrecords(filenames, batch_size, x_dims, num_classes, num_domains,
+def load_tfrecords(filenames, batch_size, input_shape, num_classes, num_domains,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
         prefetch_buffer_size=1, data_augmentation=False):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
@@ -147,7 +147,7 @@ def load_tfrecords(filenames, batch_size, x_dims, num_classes, num_domains,
     # Create a description of the features
     # See: https://www.tensorflow.org/tutorials/load_data/tf-records
     feature_description = {
-        'x': tf.io.FixedLenFeature(x_dims, tf.float32),
+        'x': tf.io.FixedLenFeature(input_shape, tf.float32),
         'y': tf.io.FixedLenFeature([num_classes], tf.float32),
         'domain': tf.io.FixedLenFeature([num_domains], tf.float32),
     }
@@ -461,7 +461,7 @@ class TFRecordConfig:
         self.num_classes = None
         self.num_domains = None
         self.time_steps = None
-        self.x_dims = None
+        self.input_shape = None
 
         with open(os.path.join(dir_name, feature_set+".config"), 'r') as f:
             for line in f:
@@ -469,7 +469,7 @@ class TFRecordConfig:
 
                 if len(items) > 0:
                     if items[0] == "x_dims":
-                        self.x_dims = [int(x) for x in items[1:]]
+                        self.input_shape = [int(x) for x in items[1:]]
                         assert len(items) == 3, "format: x_dims int int"
                     elif items[0] == "num_features":
                         self.num_features = int(items[1])
@@ -488,4 +488,4 @@ class TFRecordConfig:
         assert self.num_classes is not None, "no \"num_classes\" in .config"
         assert self.num_domains is not None, "no \"num_domains\" in .config"
         assert self.time_steps is not None, "no \"time_steps\" in .config"
-        assert self.x_dims is not None, "no \"x_dims\" in .config"
+        assert self.input_shape is not None, "no \"x_dims\" in .config"

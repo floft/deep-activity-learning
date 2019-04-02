@@ -6,7 +6,7 @@ import sys
 import pathlib
 import tensorflow as tf
 
-from file_utils import last_modified
+from file_utils import last_modified, get_best_valid_accuracy, write_best_valid_accuracy
 
 def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
         warn=True):
@@ -121,3 +121,43 @@ def delete_models_except(model_dir, best, last):
         if not found:
             print("Deleting", f)
             os.remove(str(f))
+
+class RemoveOldCheckpoints:
+    """
+    Remove checkpoints that are not the best or the last one so we don't waste
+    tons of disk space
+    """
+    def __init__(self, log_dir, model_dir):
+        self.log_dir = log_dir
+        self.model_dir = model_dir
+
+    def before_save(self):
+        """
+        Do this right before saving, to make sure we don't mistakingly delete
+        the one we just saved in after_save. This will in effect keep the last
+        two instead of just the last one.
+        """
+        # Don't warn since we know there will be a DataLossError since we're
+        # still training and the file isn't complete yet.
+        best, last = get_files_to_keep(self.log_dir, warn=False)
+        delete_models_except(self.model_dir, best, last)
+
+    def after_save(self):
+        """
+        Keep track of the best accuracy we've gotten on the validation data.
+        This file is used for automated hyperparameter tuning.
+
+        This is done after saving since possibly the latest checkpoint had the
+        highest validation accuracy.
+        """
+        # Get previous best if available
+        previous_best = get_best_valid_accuracy(self.log_dir)
+
+        # Get new best
+        _, best_accuracy = get_step_from_log(self.log_dir, last=False, warn=False)
+
+        # Only if we got some accuracy (e.g. log might not exist)
+        if best_accuracy is not None:
+            # Write if new best is better than previous best
+            if previous_best is None or best_accuracy > previous_best:
+                write_best_valid_accuracy(self.log_dir, best_accuracy)

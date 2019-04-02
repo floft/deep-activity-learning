@@ -42,83 +42,116 @@ class StopGradient(tf.keras.layers.Layer):
     def call(self, inputs, training=None):
         return tf.stop_gradient(inputs)
 
-def feature_extractor(net, layers, units, dropout):
+class ResnetFeatureExtractor(tf.keras.Model):
     """ Feature extractor with residual connections """
-    for i in range(layers):
-        shortcut = net
-
-        net = tf.keras.layers.Dense(units, activation="uniform")(net)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation("relu")(net)
-        net = tf.keras.layers.Dropout(dropout)(net)
-
-        net = tf.keras.layers.Dense(units, activation="uniform")(net)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation("relu")(net)
-        net = tf.keras.layers.Dropout(dropout)(net)
-
-        if i > 0:
-            net = tf.keras.layers.Add()([shortcut, net])
-
-    return net
-
-def classifier(net, layers, units, dropout, num_classes, name=None):
-    """ MLP classifier """
-    for _ in range(layers):
-        net = tf.keras.layers.Dense(units, activation="uniform")(net)
-        net = tf.keras.layers.BatchNormalization()(net)
-        net = tf.keras.layers.Activation("relu")(net)
-        net = tf.keras.layers.Dropout(dropout)(net)
-
-    net = tf.keras.layers.Dense(num_classes, activation="uniform")(net)
-    net = tf.keras.layers.Activation("softmax", name=name)(net)
-    return net
-
-class FlatModel(tf.keras.Model):
-    def __init__(self, input_shape, num_classes, num_domains):
+    def __init__(self, layers, units, dropout):
         super().__init__()
 
-        # Flatten and normalize
+        self.layers = []
+        self.adds = []
+
+        for _ in range(layers):
+            layers.append(tf.keras.Sequential([
+                tf.keras.layers.Dense(units, activation="uniform"),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.Activation("relu"),
+                tf.keras.layers.Dropout(dropout),
+
+                tf.keras.layers.Dense(units, activation="uniform"),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.Activation("relu"),
+                tf.keras.layers.Dropout(dropout),
+            ]))
+
+            adds.append(tf.keras.layers.Add())
+
+    def call(self, inputs, training=None):
+        net = inputs
+
+        for i, (layer, add) in enumerate(zip(self.layers, self.adds)):
+            shortcut = net
+            net = layer(net)
+
+            if i > 0:
+                net = add([shortcut, net])
+
+        return net
+
+def classifier(layers, units, dropout, num_classes, name=None):
+    """ MLP classifier """
+    model = tf.keras.Sequential()
+
+    for _ in range(layers):
+        model.add(tf.keras.layers.Dense(units, activation="uniform"))
+        model.add(tf.keras.layers.BatchNormalization())
+        model.add(tf.keras.layers.Activation("relu"))
+        model.add(tf.keras.layers.Dropout(dropout))
+
+    model.add(tf.keras.layers.Dense(num_classes, activation="uniform"))
+    model.add(tf.keras.layers.Activation("softmax", name=name))
+    return model
+
+class DomainClassifier(tf.keras.Model):
+    """ classifier() but stopping/flipping gradients and concatenating if generalization """
+    def __init__(self, layers, units, dropout, num_domains, name=None):
+        super().__init__()
+        self.stop_gradient = StopGradient()
+        self.flip_gradient = FlipGradient()
+        self.concat = tf.keras.layers.Concatenate()
+        self.classifier = classifier(layers, units, dropout, num_domains, name)
+
+    def call(self, inputs, training=None):
+        assert len(inputs) == 2, "Must call DomainClassiferModel(...)([fe, task])"
+        net = inputs[0] # feature extractor output
+        task = inputs[1] # task classifier output
+
+        # For generalization, we also pass in the task classifier output to the
+        # discriminator though forbid gradients from being passed through to
+        # the task classifier.
+        if FLAGS.generalization:
+            task_stop_gradient = self.stop_gradient(task)
+            net = self.concat([net, task_stop_gradient])
+
+        net = self.flip_gradient(net)
+        net = self.classifier(net)
+        return net
+
+class BaseModel(tf.keras.Model):
+    """ Base model that we'll derive variations from """
+    def __init__(self, num_classes, num_domains):
+        super().__init__()
+
+        # Feature extractor
+        self.fe = ResnetFeatureExtractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
+
+        # Task classifier
+        self.task_classifier = classifier(FLAGS.task_layers, FLAGS.units,
+            FLAGS.dropout, num_classes, name="task_output")
+
+        # Domain classifier
+        self.domain_classifier = DomainClassifier(FLAGS.domain_layers, FLAGS.units,
+            FLAGS.dropout, num_domains, name="domain_output")
+
+    def call(self, inputs, grl_lambda=1.0, training=None):
+        net = self.fe(inputs, training=training)
+        task = self.task_classifier(net, training=training)
+        domain = self.domain_classifier([net, task], training=training)
+        return [task, domain]
+
+class FlatModel(BaseModel):
+    """ Flatten and normalize """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.pre = tf.keras.Sequential([
             tf.keras.layers.Flatten(),
             tf.keras.layers.BatchNormalization()
         ])
 
-        # Feature extractor
-        self.fe = feature_extractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
-
     def call(self, inputs, grl_lambda=1.0, training=None):
-        net = self.pre(inputs)
-        net = self.fe(net)
+        net = self.pre(inputs, training=training)
+        return super().call(net, grl_lambda, training)
 
-        # Task classifier
-        task = classifier(net, FLAGS.task_layers, FLAGS.units, FLAGS.dropout,
-            num_classes, name="task_output")
-
-        # Domain classifier
-        #
-        # For generalization, we also pass in the task classifier output to the
-        # discriminator though forbid gradients from being passed through to
-        # the task classifier.
-        if FLAGS.generalization:
-            task_stop_gradient = StopGradient()(task)
-            domain = tf.keras.layers.Concatenate()([net, task_stop_gradient])
-        else:
-            domain = net
-
-        domain = FlipGradient()(domain)
-        domain = classifier(domain, FLAGS.domain_layers, FLAGS.units, FLAGS.dropout,
-            num_domains, name="domain_output")
-
-def make_flat(input_shape, num_classes, num_domains, grl_lambda):
-    """ Flatten the input and pass directly to the feature extractor """
-    inputs = tf.keras.layers.Input(input_shape)
-
-
-
-    return tf.keras.Model(inputs=inputs, outputs=[task,domain])
-
-def make_task_loss(training):
+def task_loss(y_true, y_pred, training):
     """
     Compute loss on the outputs of the task classifier
 
@@ -126,38 +159,36 @@ def make_task_loss(training):
     but for the task loss when doing adaptation we need to ignore the second half
     of the batch since this is unsupervised
     """
-    def loss(y_true, y_pred):
-        # Basically the same but only on half the batch
-        cce = tf.keras.losses.CategoricalCrossentropy()
+    # Basically the same but only on half the batch
+    cce = tf.keras.losses.CategoricalCrossentropy()
 
-        # If doing domain adaptation, then we'll need to ignore the second half of the
-        # batch for task classification during training since we don't know the labels
-        # of the target data
-        if FLAGS.adaptation and training:
-            # Note: this is twice the batch_size in the train() function since we cut
-            # it in half there -- this is the sum of both source and target data
-            batch_size = tf.shape(y_pred)[0]
+    # If doing domain adaptation, then we'll need to ignore the second half of the
+    # batch for task classification during training since we don't know the labels
+    # of the target data
+    if FLAGS.adaptation and training:
+        # Note: this is twice the batch_size in the train() function since we cut
+        # it in half there -- this is the sum of both source and target data
+        batch_size = tf.shape(y_pred)[0]
 
-            y_pred = tf.slice(y_pred, [0, 0], [batch_size // 2, -1])
-            y_true = tf.slice(y_true, [0, 0], [batch_size // 2, -1])
+        y_pred = tf.slice(y_pred, [0, 0], [batch_size // 2, -1])
+        y_true = tf.slice(y_true, [0, 0], [batch_size // 2, -1])
 
-        return cce(y_pred, y_true)
+    return cce(y_pred, y_true)
 
-    return loss
+def domain_loss(y_true, y_pred, training):
+    """ Compute loss on the outputs of the domain classifier """
+    cce = tf.keras.losses.CategoricalCrossentropy()
+    return cce(y_pred, y_true)
 
-def make_model(x_dims, num_classes, num_domains, grl_lambda, lr, training):
-    """ Make the model, create the losses, metrics, etc. """
+def compute_accuracy(y_true, y_pred):
+    return tf.reduce_mean(input_tensor=tf.cast(tf.equal(
+            tf.argmax(y_true, axis=-1),
+            tf.argmax(y_pred, axis=-1)),
+        tf.float32))
 
+def make_model(num_classes, num_domains):
+    """ Make the model """
     if FLAGS.model == "flat":
-        model = make_flat(x_dims, num_classes, num_domains, grl_lambda)
+        model = FlatModel(num_classes, num_domains)
 
-    loss = {"task_output": make_task_loss(training)}
-    loss_weights = {"task_output": 1.0}
-
-    if FLAGS.adaptation or FLAGS.generalization:
-        loss["domain_output"] = tf.keras.losses.CategoricalCrossentropy()
-        loss_weights["domain_output"] = 1.0
-
-    opt = tf.keras.optimizers.Adam(lr)
-    model.compile(optimizer=opt, loss=loss, loss_weights=loss_weights,
-        metrics=["accuracy"])
+    return model

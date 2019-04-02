@@ -208,7 +208,8 @@ def train(
         global_step.assign_add(1)
         t = time.time() - t
 
-        print("step", int(global_step), "took", t, "seconds")
+        if i%10 == 0:
+            print("step", int(global_step), "took", t, "seconds")
 
         # Checkpoints
         if i%FLAGS.model_steps == 0:

@@ -71,8 +71,8 @@ class Metrics:
     for viewing in TensorBoard.
 
     Accuracy values:
-        accuracy_{domain,task}/{a,b}/{training,validation}
-        accuracy_task_class_{class1name,...}/{a,b}/{training,validation}
+        accuracy_{domain,task}/{source,target}/{training,validation}
+        accuracy_task_class_{class1name,...}/{source,target}/{training,validation}
 
     Loss values:
         loss/{total,task,domain}
@@ -85,9 +85,9 @@ class Metrics:
         self.datasets = ["training", "validation"]
 
         if FLAGS.generalize:
-            self.domains = ["a"]
+            self.domains = ["source"]
         else:
-            self.domains = ["a", "b"]
+            self.domains = ["source", "target"]
 
         # Create all entire-batch categorical accuracy metrics
         self.categorical_metrics = {}
@@ -205,8 +205,8 @@ class Metrics:
         self._reset_states()
 
     def _process_partial(self, results, domain, dataset):
-        """ Call this on each batch when running on train/test data (domain A = "a",
-        then domain B = "b") to update the partial metric results """
+        """ Call this on each batch when running on train/test data (domain A = "source",
+        then domain B = "target") to update the partial metric results """
         assert dataset in self.datasets, "unknown dataset "+str(dataset)
         assert domain in self.domains, "unknown domain "+str(domain)
         self._process_accuracy(results, domain, dataset)
@@ -220,14 +220,14 @@ class Metrics:
         """ Run the data A/B through the model """
         if FLAGS.generalize:
             run_multi_batch(model, data_a, None, None,
-                lambda results: self._process_partial(results, "a", dataset),
+                lambda results: self._process_partial(results, "source", dataset),
                 FLAGS.max_examples)
         else:
             run_multi_batch(model, data_a, 0, self.num_domains,
-                lambda results: self._process_partial(results, "a", dataset),
+                lambda results: self._process_partial(results, "source", dataset),
                 FLAGS.max_examples)
             run_multi_batch(model, data_b, 1, self.num_domains,
-                lambda results: self._process_partial(results, "b", dataset),
+                lambda results: self._process_partial(results, "target", dataset),
                 FLAGS.max_examples)
 
     def train(self, model, data_a, data_b, step, train_time):

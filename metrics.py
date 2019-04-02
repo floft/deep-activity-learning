@@ -24,6 +24,9 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples=
     """
     examples = 0
 
+    if data is None:
+        return
+
     for x, task_y_true, domain_y_true in data:
         # Make sure we don't go over the desired number of examples
         # But, only if we don't want to evaluate all examples (i.e. if
@@ -111,10 +114,10 @@ class Metrics:
 
     def _reset_states(self):
         """ Reset states of all the Keras metrics """
-        for _, v in self.categorical_metrics:
+        for _, v in self.categorical_metrics.items():
             v.reset_states()
 
-        for _, v in self.per_class_metrics:
+        for _, v in self.per_class_metrics.items():
             v.reset_states()
 
         self.loss_total.reset_states()
@@ -231,11 +234,17 @@ class Metrics:
         """ Call this once after evaluating on the training data for domain A
         and domain B """
         dataset = "training"
+        step = int(step)
 
         # Only one batch is passed in for training, so make it a list so that
-        # we can reuse the _run_partial function
+        # we can reuse the _run_partial function. However, only if we have data.
+        if data_a is not None:
+            data_a = [data_a]
+        if data_b is not None:
+            data_b = [data_b]
+
         t = time.time()
-        self._run_partial(model, [data_a], [data_b], dataset)
+        self._run_partial(model, data_a, data_b, dataset)
         t = time.time() - t
 
         self._write_data(step, "training", t, train_time)
@@ -244,6 +253,7 @@ class Metrics:
         """ Evaluate the model on domain A/B but batched to make sure we don't
         run out of memory """
         dataset = "validation"
+        step = int(step)
 
         t = time.time()
         self._run_partial(model, eval_data_a, eval_data_b, dataset)

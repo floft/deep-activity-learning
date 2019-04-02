@@ -143,6 +143,8 @@ def load_tfrecords(filenames, batch_size, input_shape, num_classes, num_domains,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
         prefetch_buffer_size=1, data_augmentation=False):
     """ Load data from .tfrecord files (requires less memory but more disk space) """
+    if len(filenames) == 0:
+        return None
 
     # Create a description of the features
     # See: https://www.tensorflow.org/tutorials/load_data/tf-records

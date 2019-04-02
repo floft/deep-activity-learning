@@ -32,7 +32,7 @@ flags.DEFINE_integer("steps", 100000, "Number of training steps to run")
 flags.DEFINE_integer("batch", 1024, "Batch size to use")
 flags.DEFINE_float("lr", 0.0001, "Learning rate for training")
 flags.DEFINE_float("lr_mult", 1.0, "Multiplier for extra discriminator training learning rate")
-flags.DEFINE_float("gpu_mem", 0.4, "Percentage of GPU memory to let TensorFlow use")
+flags.DEFINE_float("gpumem", 0.4, "Percentage of GPU memory to let TensorFlow use")
 flags.DEFINE_integer("model_steps", 4000, "Save the model every so many steps")
 flags.DEFINE_integer("log_train_steps", 500, "Log training information every so many steps")
 flags.DEFINE_integer("log_val_steps", 4000, "Log validation information every so many steps")
@@ -44,21 +44,21 @@ flags.DEFINE_boolean("feature_extractor", True, "Use a feature extractor before 
 flags.DEFINE_float("min_domain_accuracy", 0.5, "If generalize, min domain classifier accuracy")
 flags.DEFINE_float("max_domain_iters", 10, "If generalize, max domain classifier training iterations")
 flags.DEFINE_boolean("debug", False, "Start new log/model/images rather than continuing from previous run")
-flags.DEFINE_integer("debug_num", -1, "Specify exact log/model/images number to use rather than incrementing from last. (Don't pass both this and --debug at the same time.)")
+flags.DEFINE_integer("debugnum", -1, "Specify exact log/model/images number to use rather than incrementing from last. (Don't pass both this and --debug at the same time.)")
 
 def get_directory_names():
     """ Figure out the log and model directory names """
     prefix = FLAGS.target+"-fold"+str(FLAGS.fold)+"-"+FLAGS.model
 
-    if FLAGS.adaptation:
+    if FLAGS.adapt:
         prefix += "-da"
     elif FLAGS.generalize:
         prefix += "-dg"
 
     # Use the number specified on the command line (higher precidence than --debug)
-    if FLAGS.debug_num >= 0:
-        attempt = FLAGS.debug_num
-        logging.info("Debugging attempt:", attempt)
+    if FLAGS.debugnum >= 0:
+        attempt = FLAGS.debugnum
+        logging.info("Debugging attempt: %s", attempt)
 
         prefix += "-"+str(attempt)
         model_dir = os.path.join(FLAGS.modeldir, prefix)
@@ -67,7 +67,7 @@ def get_directory_names():
     elif FLAGS.debug:
         attempt = last_modified_number(FLAGS.logdir, prefix+"*")
         attempt = attempt+1 if attempt is not None else 1
-        logging.info("Debugging attempt:", attempt)
+        logging.info("Debugging attempt: %s", attempt)
 
         prefix += "-"+str(attempt)
         model_dir = os.path.join(FLAGS.modeldir, prefix)
@@ -80,29 +80,33 @@ def get_directory_names():
 
     return model_dir, log_dir
 
-@tf.function
-def train_step(
-        data_batch_a, labels_batch_a, domains_batch_a,
-        data_batch_b, labels_batch_b, domains_batch_b,
-        model, opt, d_opt, grl_lambda, source_domain, target_domain):
+#@tf.function
+def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
+        source_domain, target_domain):
     """ Compiled training step that we call many times """
+    if data_a is not None:
+        data_batch_a, labels_batch_a, domains_batch_a = data_a
+    if data_b is not None:
+        data_batch_b, labels_batch_b, domains_batch_b = data_b
 
     with tf.GradientTape() as tape, tf.GradientTape() as d_tape:
         # Concatenate for adaptation - concatenate source labels with all-zero
         # labels for target since we can't use the target labels during
         # unsupervised domain adaptation
-        if FLAGS.adaptation:
+        if FLAGS.adapt:
+            assert data_a is not None, "Adaptation requires both datasets A and B"
+            assert data_b is not None, "Adaptation requires both datasets A and B"
             x = np.concatenate((data_batch_a, data_batch_b), axis=0)
             task_y_true = np.concatenate((labels_batch_a, np.zeros(labels_batch_b.shape)), axis=0)
             domain_y_true = np.concatenate((source_domain, target_domain), axis=0)
         elif FLAGS.generalize:
             x = data_batch_a
-            domain_y_true = labels_batch_a
-            task_y_true = domains_batch_a
+            task_y_true = labels_batch_a
+            domain_y_true = domains_batch_a
         else:
             x = data_batch_a
-            domain_y_true = labels_batch_a
-            task_y_true = source_domain
+            task_y_true = labels_batch_a
+            domain_y_true = source_domain
 
         # Run model
         task_y_pred, domain_y_pred = model(x, grl_lambda=grl_lambda, training=True)
@@ -113,18 +117,18 @@ def train_step(
 
         # Update model
         grad = tape.gradient(loss, model.trainable_variables)
-        grad.apply_gradients(zip(grad, model.trainable_variables))
+        opt.apply_gradients(zip(grad, model.trainable_variables))
 
         # Update discriminator differently
-        if FLAGS.adaptation:
+        if FLAGS.adapt:
             d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
-            d_grad.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
+            d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
         elif FLAGS.generalize:
             for _ in range(FLAGS.max_domain_iters):
                 task_y_pred, domain_y_pred = model(x, grl_lambda=0.0, training=True)
                 d_loss = domain_loss(domain_y_true, domain_y_pred, training=True)
                 d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
-                d_grad.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
+                d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
 
                 # Break if high enough accuracy
                 domain_acc = compute_accuracy(domain_y_true, domain_y_pred)
@@ -136,9 +140,11 @@ def train(
         tfrecords_train_a, tfrecords_train_b,
         tfrecords_test_a, tfrecords_test_b,
         config, model_dir, log_dir):
+    batch_size = FLAGS.batch
+
     # For adaptation, we'll be concatenating together half source and half target
     # data, so to keep the batch_size about the same, we'll cut it in half
-    if FLAGS.adaptation:
+    if FLAGS.adapt:
         batch_size = batch_size // 2
 
     # Input training data
@@ -147,8 +153,8 @@ def train(
     train_data_b = load_tfrecords(tfrecords_train_b, batch_size, input_shape,
         num_classes, num_domains, data_augmentation=FLAGS.augment)
     # These iterate forever due to the .repeat() in the above
-    train_data_a_iter = iter(train_data_a)
-    train_data_b_iter = iter(train_data_b)
+    train_data_a_iter = iter(train_data_a) if train_data_a is not None else None
+    train_data_b_iter = iter(train_data_b) if train_data_b is not None else None
 
     # Load all the test data in one batch
     eval_data_a = load_tfrecords(tfrecords_test_a, batch_size, input_shape,
@@ -178,6 +184,7 @@ def train(
 
     # Checkpoints
     remove_old_checkpoints = RemoveOldCheckpoints(log_dir, model_dir)
+    checkpoint_dir = os.path.join(model_dir, "model.ckpt")
     checkpoint = tf.train.Checkpoint(
         global_step=global_step, opt=opt, d_opt=d_opt, model=model)
     checkpoint.restore(tf.train.latest_checkpoint(model_dir))
@@ -186,29 +193,24 @@ def train(
     writer = tf.summary.create_file_writer(log_dir)
     metrics = Metrics(writer, num_classes, num_domains, config)
 
-    # Allow running multiple at once
-    # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
-    # https://github.com/tensorflow/tensorflow/issues/25138
-    tfconfig.set_gpu_per_process_memory_fraction(FLAGS.gpu_mem)
-
     # Start training
-    for i in range(global_step, FLAGS.steps+1):
+    for i in range(int(global_step), FLAGS.steps+1):
         # GRL schedule from DANN paper
         grl_lambda = 2/(1+np.exp(-10*(i/(FLAGS.steps+1))))-1
 
         # Get data for this iteration
-        data_a = next(train_data_a_iter)
-        data_b = next(train_data_b_iter)
+        data_a = next(train_data_a_iter) if train_data_a_iter is not None else None
+        data_b = next(train_data_b_iter) if train_data_b_iter is not None else None
 
         t = time.time()
-        train_step(*data_a, *data_b, model, opt, d_opt, grl_lambda,
+        train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
             source_domain, target_domain)
         t = time.time() - t
 
         # Checkpoints
         if i%FLAGS.model_steps == 0:
             remove_old_checkpoints.before_save()
-            checkpoint.save(file_prefix=model_dir)
+            checkpoint.save(file_prefix=checkpoint_dir)
             remove_old_checkpoints.after_save()
 
         # Metrics
@@ -222,7 +224,13 @@ def train(
     write_finished(log_dir)
 
 def main(argv):
-    assert not (FLAGS.adaptation and FLAGS.generalize), \
+    # Allow running multiple at once
+    # https://www.tensorflow.org/guide/using_gpu#allowing_gpu_memory_growth
+    # https://github.com/tensorflow/tensorflow/issues/25138
+    # Note: GPU options must be set at program startup
+    tfconfig.set_gpu_per_process_memory_fraction(FLAGS.gpumem)
+
+    assert not (FLAGS.adapt and FLAGS.generalize), \
         "Currently cannot enable both adaptation and generalization at the same time"
 
     #

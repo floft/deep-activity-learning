@@ -73,6 +73,7 @@ class Metrics:
 
     Accuracy values:
         accuracy_{domain,task}/{source,target}/{training,validation}
+        auc_task/{source,target}/{training,validation}
         accuracy_task_class_{class1name,...}/{source,target}/{training,validation}
 
     Loss values:
@@ -94,23 +95,28 @@ class Metrics:
         else:
             self.domains = ["source", "target"]
 
-        # Create all entire-batch categorical accuracy metrics
-        self.categorical_metrics = {}
+        # Create all entire-batch metrics
+        self.batch_metrics = {dataset: {} for dataset in self.datasets}
         for domain in self.domains:
             for dataset in self.datasets:
                 for name in ["domain", "task"]:
                     n = "accuracy_%s/%s/%s"%(name, domain, dataset)
-                    self.categorical_metrics[n] = tf.keras.metrics.CategoricalAccuracy(name=n)
+                    self.batch_metrics[dataset][n] = tf.keras.metrics.CategoricalAccuracy(name=n)
 
-        # Create all per-class accuracy metrics
-        self.per_class_metrics = {}
+        for domain in self.domains:
+            for dataset in self.datasets:
+                n = "auc_task/%s/%s"%(domain, dataset)
+                self.batch_metrics[dataset][n] = tf.keras.metrics.AUC(name=n)
+
+        # Create all per-class metrics
+        self.per_class_metrics = {dataset: {} for dataset in self.datasets}
         for i in range(self.num_classes):
             class_name = self.config.int_to_label(i)
 
             for domain in self.domains:
                 for dataset in self.datasets:
                     n = "accuracy_task_class_%s/%s/%s"%(class_name, domain, dataset)
-                    self.per_class_metrics[n] = tf.keras.metrics.Accuracy(name=n)
+                    self.per_class_metrics[dataset][n] = tf.keras.metrics.Accuracy(name=n)
 
         # Losses
         self.loss_total = tf.keras.metrics.Mean(name="loss/total")
@@ -119,11 +125,12 @@ class Metrics:
 
     def _reset_states(self):
         """ Reset states of all the Keras metrics """
-        for _, v in self.categorical_metrics.items():
-            v.reset_states()
+        for dataset in self.datasets:
+            for _, metric in self.batch_metrics[dataset].items():
+                metric.reset_states()
 
-        for _, v in self.per_class_metrics.items():
-            v.reset_states()
+            for _, metric in self.per_class_metrics[dataset].items():
+                metric.reset_states()
 
         self.loss_total.reset_states()
         self.loss_task.reset_states()
@@ -137,20 +144,23 @@ class Metrics:
         self.loss_task(task_loss)
         self.loss_domain(domain_loss)
 
-    def _process_accuracy(self, results, domain, dataset):
+    def _process_batch(self, results, domain, dataset):
         """ Update metrics for accuracy over entire batch for domain-dataset """
         task_y_true, task_y_pred, domain_y_true, domain_y_pred, \
             _, _, _ = results
 
         # Update domain accuracy
         n = "accuracy_domain/%s/%s"%(domain, dataset)
-        self.categorical_metrics[n](domain_y_true, domain_y_pred)
+        self.batch_metrics[dataset][n](domain_y_true, domain_y_pred)
 
         # Update task accuracy
         n = "accuracy_task/%s/%s"%(domain, dataset)
-        self.categorical_metrics[n](task_y_true, task_y_pred)
+        self.batch_metrics[dataset][n](task_y_true, task_y_pred)
 
-    def _process_accuracy_per_class(self, results, domain, dataset):
+        n = "auc_task/%s/%s"%(domain, dataset)
+        self.batch_metrics[dataset][n](task_y_true, task_y_pred)
+
+    def _process_per_class(self, results, domain, dataset):
         """ Update metrics for accuracy over per-class portions of batch for domain-dataset """
         task_y_true, task_y_pred, _, _, _, _, _ = results
         batch_size = tf.shape(task_y_true)[0]
@@ -177,7 +187,7 @@ class Metrics:
 
             # Update task accuracy
             n = "accuracy_task_class_%s/%s/%s"%(class_name, domain, dataset)
-            self.per_class_metrics[n](acc_y_true, acc_y_pred)
+            self.per_class_metrics[dataset][n](acc_y_true, acc_y_pred)
 
     def _write_data(self, step, dataset, eval_time, train_time=None):
         """ Write either the training or validation data """
@@ -185,15 +195,11 @@ class Metrics:
 
         # Write all the values to the file
         with self.writer.as_default():
-            for domain in self.domains:
-                for name in ["domain", "task"]:
-                    n = "accuracy_%s/%s/%s"%(name, domain, dataset)
-                    tf.summary.scalar(n, self.categorical_metrics[n].result(), step=step)
+            for key, metric in self.batch_metrics[dataset].items():
+                tf.summary.scalar(key, metric.result(), step=step)
 
-                for i in range(self.num_classes):
-                    class_name = self.config.int_to_label(i)
-                    n = "accuracy_task_class_%s/%s/%s"%(class_name, domain, dataset)
-                    tf.summary.scalar(n, self.per_class_metrics[n].result(), step=step)
+            for key, metric in self.per_class_metrics[dataset].items():
+                tf.summary.scalar(key, metric.result(), step=step)
 
             tf.summary.scalar("step_time/metrics/%s"%(dataset), eval_time, step=step)
 
@@ -214,8 +220,8 @@ class Metrics:
         then domain B = "target") to update the partial metric results """
         assert dataset in self.datasets, "unknown dataset "+str(dataset)
         assert domain in self.domains, "unknown domain "+str(domain)
-        self._process_accuracy(results, domain, dataset)
-        self._process_accuracy_per_class(results, domain, dataset)
+        self._process_batch(results, domain, dataset)
+        self._process_per_class(results, domain, dataset)
 
         # Only log losses on training data
         if dataset == "training":

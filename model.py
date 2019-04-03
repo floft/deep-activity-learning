@@ -45,8 +45,8 @@ def make_flip_gradient():
 
 class FlipGradient(tf.keras.layers.Layer):
     """ Gradient reversal layer """
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.flip_gradient = make_flip_gradient()
 
     def call(self, inputs, grl_lambda=1.0, training=None):
@@ -64,8 +64,8 @@ class DenseBlock(tf.keras.layers.Layer):
     Note: doing this rather than Sequential because dense gives error if we pass
     training=True to it
     """
-    def __init__(self, units, dropout):
-        super().__init__()
+    def __init__(self, units, dropout, **kwargs):
+        super().__init__(**kwargs)
         self.dense = tf.keras.layers.Dense(units)
         self.bn = tf.keras.layers.BatchNormalization()
         self.act = tf.keras.layers.Activation("relu")
@@ -80,8 +80,9 @@ class DenseBlock(tf.keras.layers.Layer):
 
 class ResnetBlock(tf.keras.layers.Layer):
     """ Block consisting of other blocks but with residual connections """
-    def __init__(self, units, dropout, layers=None, make_block=DenseBlock):
-        super().__init__()
+    def __init__(self, units, dropout, layers=None,
+            make_block=DenseBlock, **kwargs):
+        super().__init__(**kwargs)
 
         if layers is None:
             layers = FLAGS.resnet_layers
@@ -103,8 +104,8 @@ class Classifier(tf.keras.layers.Layer):
     """ MLP classifier -- multiple DenseBlock followed by dense of size
     num_classes and softmax """
     def __init__(self, layers, units, dropout, num_classes,
-            make_block=DenseBlock):
-        super().__init__()
+            make_block=DenseBlock, **kwargs):
+        super().__init__(**kwargs)
         assert layers > 0, "must have layers > 0"
         self.blocks = [make_block(units, dropout) for _ in range(layers-1)]
         self.dense = tf.keras.layers.Dense(num_classes)
@@ -124,8 +125,8 @@ class Classifier(tf.keras.layers.Layer):
 class DomainClassifier(tf.keras.layers.Layer):
     """ Classifier() but stopping/flipping gradients and concatenating if
     generalization """
-    def __init__(self, layers, units, dropout, num_domains):
-        super().__init__()
+    def __init__(self, layers, units, dropout, num_domains, **kwargs):
+        super().__init__(**kwargs)
         self.stop_gradient = StopGradient()
         self.flip_gradient = FlipGradient()
         self.concat = tf.keras.layers.Concatenate(axis=1)
@@ -150,8 +151,8 @@ class DomainClassifier(tf.keras.layers.Layer):
 class FeatureExtractor(tf.keras.layers.Layer):
     """ Resnet feature extractor """
     def __init__(self, layers, units, dropout,
-            make_base_block=DenseBlock, make_res_block=ResnetBlock):
-        super().__init__()
+            make_base_block=DenseBlock, make_res_block=ResnetBlock, **kwargs):
+        super().__init__(**kwargs)
         assert layers > 0, "must have layers > 0"
         # First can't be residual since x isn't of size units
         self.blocks = [make_base_block(units, dropout) for _ in range(FLAGS.resnet_layers)]
@@ -167,8 +168,8 @@ class FeatureExtractor(tf.keras.layers.Layer):
 
 class FlatModel(tf.keras.layers.Layer):
     """ Flatten and normalize then model """
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.flatten = tf.keras.layers.Flatten()
         self.bn = tf.keras.layers.BatchNormalization(momentum=0.999)
 
@@ -191,8 +192,11 @@ class DomainAdaptationModel(tf.keras.Model):
             task_y_pred, domain_y_pred = model(x, grl_lambda=1.0, training=True)
             ...
     """
-    def __init__(self, num_classes, num_domains):
-        super().__init__()
+    def __init__(self, num_classes, num_domains, name=None, **kwargs):
+        if name is None:
+            name = "DA_Model_"+FLAGS.model
+        super().__init__(name=name, **kwargs)
+
         self.feature_extractor = FeatureExtractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
         self.task_classifier = Classifier(FLAGS.task_layers, FLAGS.units,
             FLAGS.dropout, num_classes)

@@ -140,8 +140,7 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
                 if domain_acc > FLAGS.min_domain_accuracy:
                     break
 
-def train(
-        num_features, num_classes, num_domains, input_shape,
+def train(num_classes, num_domains, input_shape,
         tfrecords_train_a, tfrecords_train_b,
         tfrecords_test_a, tfrecords_test_b,
         config, model_dir, log_dir):
@@ -293,8 +292,7 @@ def main(argv):
     #
     # Run training
     #
-    train(tfrecord_config.num_features,
-            tfrecord_config.num_classes,
+    train(tfrecord_config.num_classes,
             tfrecord_config.num_domains,
             tfrecord_config.input_shape,
             tfrecords_train_a, tfrecords_train_b,

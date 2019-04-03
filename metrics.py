@@ -7,7 +7,7 @@ import tensorflow as tf
 from absl import flags
 
 from load_data import domain_labels
-from model import make_task_loss, make_domain_loss
+from models import make_task_loss, make_domain_loss
 
 FLAGS = flags.FLAGS
 

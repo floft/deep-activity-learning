@@ -14,7 +14,7 @@ from tensorflow.python.framework import config as tfconfig
 
 from load_data import load_tfrecords, domain_labels, get_tfrecord_datasets, \
     ALConfig, TFRecordConfig, calc_class_weights
-from model import DomainAdaptationModel, make_task_loss, make_domain_loss, \
+from models import DomainAdaptationModel, make_task_loss, make_domain_loss, \
     compute_accuracy
 from file_utils import last_modified_number, write_finished
 from metrics import Metrics

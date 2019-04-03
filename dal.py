@@ -41,8 +41,6 @@ flags.DEFINE_integer("log_val_steps", 4000, "Log validation information every so
 flags.DEFINE_boolean("augment", False, "Perform data augmentation (for simple2 dataset)")
 flags.DEFINE_boolean("sample", False, "Only use a small amount of data for training/testing")
 flags.DEFINE_boolean("test", False, "Swap out validation data for real test data (debugging in tensorboard)")
-flags.DEFINE_boolean("bidirectional", False, "Use a bidirectional RNN (when selected method includes an RNN)")
-flags.DEFINE_boolean("feature_extractor", True, "Use a feature extractor before task classifier/domain predictor")
 flags.DEFINE_float("min_domain_accuracy", 0.5, "If generalize, min domain classifier accuracy")
 flags.DEFINE_float("max_domain_iters", 10, "If generalize, max domain classifier training iterations")
 flags.DEFINE_boolean("debug", False, "Start new log/model/images rather than continuing from previous run")
@@ -197,7 +195,7 @@ def train(
 
     # Optimizers
     opt = tf.keras.optimizers.Adam(FLAGS.lr)
-    d_opt = tf.keras.optimizers.Adam(FLAGS.lr)
+    d_opt = tf.keras.optimizers.Adam(FLAGS.lr*FLAGS.lr_mult)
 
     # Checkpoints
     checkpoint = tf.train.Checkpoint(

@@ -22,7 +22,8 @@ import tensorflow as tf
 
 from absl import flags
 
-from file_utils import get_best_valid_accuracy, write_best_valid_accuracy
+from file_utils import get_best_valid_accuracy, write_best_valid_accuracy, \
+    get_last_int
 
 FLAGS = flags.FLAGS
 
@@ -51,8 +52,10 @@ class CheckpointManager:
 
         # Restore best from file or if no file yet, set it to zero
         self.best_validation = get_best_valid_accuracy(self.log_dir)
+        self.found = True
 
         if self.best_validation is None:
+            self.found = False
             self.best_validation = 0.0
 
     def restore_latest(self):
@@ -62,6 +65,30 @@ class CheckpointManager:
     def restore_best(self):
         """ Restore the checkpoint from the best one """
         self.checkpoint.restore(self.best_manager.latest_checkpoint)
+
+    def latest_step(self):
+        """ Return the step number from the latest checkpoint. Returns None if
+        no checkpoints. """
+        return self._get_step_from_manager(self.latest_manager)
+
+    def best_step(self):
+        """ Return the step number from the best checkpoint. Returns None if
+        no checkpoints. """
+        return self._get_step_from_manager(self.best_manager)
+
+    def _get_step_from_manager(self, manager):
+        # If no checkpoints found
+        if len(manager.checkpoints) == 0:
+            return None
+
+        # If one is found, the last checkpoint will be a string like
+        #   "models/target-foldX-model-debugnum/ckpt-100'
+        # and we want to step number at the end, e.g. 100 in this example
+        last = manager.checkpoints[-1] # sorted oldest to newest
+        name = os.path.basename(last)
+        step = get_last_int(name, only_one=True)
+
+        return step
 
     def save(self, step, validation_accuracy=None):
         """ Save the latest model. If validation_accuracy specified and higher

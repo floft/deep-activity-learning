@@ -4,8 +4,8 @@
 #
 if [[ -z $1 ]]; then
     echo "Usage:"
-    echo "  ./kamiak_queue_all.sh flat --dataset=al.zip --features=al --flat # flat model"
-    echo "  ./kamiak_queue_all.sh flat-da --dataset=al.zip --features=al --flat --adapt # flat model with adaptation"
+    echo "  ./kamiak_queue_all.sh flat --dataset=al.zip --features=al --model=flat # flat model"
+    echo "  ./kamiak_queue_all.sh flat-da --dataset=al.zip --features=al --model=flat --adapt # flat model with adaptation"
     echo "  Note: outputs to kamiak-{models,logs}-suffix where suffix is the first argument"
     exit 1
 fi

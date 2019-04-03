@@ -137,7 +137,7 @@ def make_instrumentation(debug=False):
     balance = inst.var.OrderedDiscrete([True, False]) # boolean
     units = inst.var.OrderedDiscrete([i*10 for i in range(1,21)]) # 10 to 200 by 10's
     layers = inst.var.OrderedDiscrete(list(range(1,13))) # 1 to 12
-    dropout = inst.var.OrderedDiscrete([5*i/100 for i in range(10,21)]) # 0.5 to 1.0 by 0.05's
+    dropout = inst.var.OrderedDiscrete([5*i/100 for i in range(0,11)]) # 0.0 to 0.5 by 0.05's
 
     # Our "function" (neural net training with output of max validation accuracy)
     # is a function of the above hyperparameters

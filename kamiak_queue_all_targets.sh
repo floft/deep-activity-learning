@@ -5,7 +5,7 @@
 #
 if [[ -z $1 ]]; then
     echo "Usage:"
-    echo "  ./kamiak_queue_all_targets.sh flat --dataset=al.zip --features=al --flat"
+    echo "  ./kamiak_queue_all_targets.sh flat --dataset=al.zip --features=al --model=flat"
     exit 1
 fi
 

@@ -105,7 +105,7 @@ logs="$data/$from-logs-$suffix"
 out="$data/dal_results_$suffix.txt"
 
 echo "Args: ${program_args[@]}" > "$out"
-{ ./dal_eval.py --gpus=8 --gpu-mem=0.9 --modeldir="$models" --logdir="$logs" \
+{ ./dal_eval.py --gpus=8 --gpumem=0.9 --modeldir="$models" --logdir="$logs" \
     "${program_args[@]}" || handle_error; } | \
     tee -a "$out"
 

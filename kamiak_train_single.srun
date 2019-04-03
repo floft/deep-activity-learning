@@ -25,7 +25,7 @@
 
 first_arg=$1
 if [[ -z $first_arg ]]; then
-    echo "Specify what method to use, e.g. --flat"
+    echo "Specify what method to use, e.g. --model=flat"
     exit 1
 else
     echo "Args: $@"
@@ -112,7 +112,7 @@ echo "Training network: started"
 mkdir -p "$data/$logFolder/" # log dir, rsync this to view with TensorBoard
 
 python3 "$program" --logdir "$data/$logFolder" --modeldir "$data/$modelFolder" \
-    --gpu-mem=0.9 "${program_args[@]}" || handle_error
+    --gpumem=0.9 "${program_args[@]}" || handle_error
 
 echo "Training network: done"
 

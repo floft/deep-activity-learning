@@ -12,7 +12,7 @@ def generate_values(N):
     balance = np.random.uniform(size=N) < 0.5 # True or False
     units = np.random.randint(1,21,size=N)*10 # 10 to 200 by 10's
     layers = np.random.randint(1,13,size=N) # 1 to 12
-    dropout = 5*np.random.randint(10,21,N)/100 # 0.5 to 1.0 by 0.05's
+    dropout = 5*np.random.randint(0,11,N)/100 # 0.0 to 0.5 by 0.05's
 
     # Make commands
     trains = []
@@ -31,7 +31,7 @@ def output_command(batch, lr, balance, units, layers, dropout, test=False):
         balance = "--balance"
         balance_short = "b"
     else:
-        balance = "--no-balance"
+        balance = "--nobalance"
         balance_short = "nb"
 
     name = "cv-" \
@@ -54,7 +54,7 @@ def output_command(batch, lr, balance, units, layers, dropout, test=False):
     test_eval_str = " --last" if test else ""
 
     train_args = args + " " \
-        + "--flat " \
+        + "--model=flat " \
         + "--batch="+str(batch) + " " \
         + "--lr=%.5f "%lr \
         + balance + " " \

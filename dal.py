@@ -14,7 +14,7 @@ from tensorflow.python.framework import config as tfconfig
 
 from load_data import load_tfrecords, domain_labels, get_tfrecord_datasets, \
     ALConfig, TFRecordConfig
-from model import make_model, task_loss, domain_loss, compute_accuracy
+from model import DomainAdaptationModel, task_loss, domain_loss, compute_accuracy
 from eval_utils import RemoveOldCheckpoints
 from file_utils import last_modified_number, write_finished
 from metrics import Metrics
@@ -25,7 +25,7 @@ flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
 flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
 flags.DEFINE_boolean("adapt", False, "Perform domain adaptation on the model")
 flags.DEFINE_boolean("generalize", False, "Perform domain generalization on the model")
-flags.DEFINE_integer("fold", 0, "What fold to use from the dataset files")
+flags.DEFINE_integer("fold", 2, "What fold to use from the dataset files")
 flags.DEFINE_string("target", "", "What dataset to use as the target (default none, i.e. blank)")
 flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
 flags.DEFINE_integer("steps", 100000, "Number of training steps to run")
@@ -176,7 +176,7 @@ def train(
     global_step = tf.Variable(0, name="global_step", trainable=False)
 
     # Build our model
-    model = make_model(num_classes, num_domains)
+    model = DomainAdaptationModel(num_classes, num_domains)
 
     # Optimizers
     opt = tf.keras.optimizers.Adam(FLAGS.lr)

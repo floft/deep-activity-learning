@@ -11,14 +11,14 @@ from absl import flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_enum("model", None, ["flat"], "What model type to use")
+flags.DEFINE_enum("model", "flat", ["flat"], "What model type to use")
 flags.DEFINE_float("dropout", 0.05, "Dropout probability")
 flags.DEFINE_integer("units", 50, "Number of LSTM hidden units and VRNN latent variable size")
 flags.DEFINE_integer("layers", 5, "Number of layers for the feature extractor")
 flags.DEFINE_integer("task_layers", 1, "Number of layers for the task classifier")
 flags.DEFINE_integer("domain_layers", 2, "Number of layers for the domain classifier")
 
-flags.mark_flag_as_required("model")
+#flags.mark_flag_as_required("model")
 flags.register_validator("dropout", lambda v: v != 0, message="dropout cannot be zero")
 
 def make_flip_gradient():
@@ -152,8 +152,33 @@ class FeatureExtractor(tf.keras.layers.Layer):
 
         return net
 
-class BaseModel(tf.keras.layers.Layer):
-    """ Base model that we'll derive variations from """
+class FlatModel(tf.keras.layers.Layer):
+    """ Flatten and normalize then model """
+    def __init__(self):
+        super().__init__()
+        self.flatten = tf.keras.layers.Flatten()
+        self.bn = tf.keras.layers.BatchNormalization()
+
+    def call(self, inputs, training=None):
+        net = self.flatten(inputs)
+        return self.bn(net, training=training)
+
+#class DomainAdaptationModel(tf.keras.layers.Layer):
+class DomainAdaptationModel(tf.keras.Model):
+    """
+    Contains custom model, feature extractor, task classifier, and domain
+    classifier
+
+    The custom model before the feature extractor depends on the command line
+    argument.
+
+    Usage:
+        model = DomainAdaptationModel(num_classes, num_domains)
+
+        with tf.GradientTape() as tape:
+            task_y_pred, domain_y_pred = model(x, grl_lambda=1.0, training=True)
+            ...
+    """
     def __init__(self, num_classes, num_domains):
         super().__init__()
         self.feature_extractor = FeatureExtractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
@@ -162,24 +187,15 @@ class BaseModel(tf.keras.layers.Layer):
         self.domain_classifier = DomainClassifier(FLAGS.domain_layers, FLAGS.units,
             FLAGS.dropout, num_domains, name="domain_output")
 
+        if FLAGS.model == "flat":
+            self.custom_model = FlatModel()
+
     def call(self, inputs, grl_lambda=1.0, training=None):
-        fe = self.feature_extractor(inputs, training=training)
-        task = self.task_classifier(fe, training=training)
-        domain = self.domain_classifier([fe, task], grl_lambda=grl_lambda, training=training)
+        net = self.custom_model(inputs, training=training)
+        net = self.feature_extractor(net, training=training)
+        task = self.task_classifier(net, training=training)
+        domain = self.domain_classifier([net, task], grl_lambda=grl_lambda, training=training)
         return task, domain
-
-class FlatModel(tf.keras.layers.Layer):
-    """ Flatten and normalize then model """
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-        self.base = BaseModel(*args, **kwargs)
-        self.flatten = tf.keras.layers.Flatten()
-        self.bn = tf.keras.layers.BatchNormalization()
-
-    def call(self, inputs, grl_lambda=1.0, training=None):
-        net = self.flatten(inputs)
-        net = self.bn(net, training=training)
-        return self.base(net, grl_lambda, training=training)
 
 def task_loss(y_true, y_pred, training):
     """
@@ -215,10 +231,3 @@ def compute_accuracy(y_true, y_pred):
             tf.argmax(y_true, axis=-1),
             tf.argmax(y_pred, axis=-1)),
         tf.float32))
-
-def make_model(num_classes, num_domains):
-    """ Make the model """
-    if FLAGS.model == "flat":
-        model = FlatModel(num_classes, num_domains)
-
-    return model

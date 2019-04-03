@@ -1,5 +1,21 @@
 """
 Checkpoints
+
+Keep both the latest and the best on validation data
+
+Usage:
+    # Create the checkpoint on the data you wish to save and the manager object
+    checkpoint = tf.train.Checkpoint(model=model, opt=opt, ...)
+    checkpoint_manager = CheckpointManager(checkpoint, model_dir, log_dir)
+
+    # Restore either the latest model with .restore_latest() to resume training
+    # or the best model with .restore_best() for evaluation after trining
+    checkpoint_manager.restore_latest()
+
+    # During training, save at a particular step and if validation_accuracy is
+    # higher than the best previous validation accuracy, then save a new "best"
+    # model as well
+    checkpoint_manager.save(step, validation_accuracy)
 """
 import os
 import tensorflow as tf

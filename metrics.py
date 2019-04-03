@@ -1,5 +1,18 @@
 """
+Metrics
+
 Update metrics for displaying in TensorBoard
+
+Usage:
+    # Create object
+    metrics = Metrics(log_dir, num_classes, num_domains, al_config,
+        task_loss_fn, domain_loss_fn, domain_b_data is not None)
+
+    # Evaluate model on training data, update metrics, save to log file
+    metrics.train(model, train_data_a, train_data_b, step, train_time)
+
+    # Evaluate model on evaluation data, update metrics, save to log file
+    validation_accuracy = metrics.test(model, eval_data_a, eval_data_b, step)
 """
 import time
 import tensorflow as tf

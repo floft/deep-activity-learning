@@ -254,10 +254,10 @@ def make_task_loss(class_weights):
             # There needs to be one weight for each item in the batch based on
             # which class that item was predicted to be
             #
-            # e.g. if we predicted classes [[0,1],[1,0],[1,0]] (i.e. class 1,
-            # class 0, class 0) for a batch size of two, and we have weights
+            # e.g. if the classes should be [[0,1],[1,0],[1,0]] (i.e. class 1,
+            # class 0, class 0) for a batch size of two, and we have class weights
             # [2,3] we should output: [3,2,2] for the weights for this batch
-            which_label = tf.argmax(y_pred, axis=-1) # e.g. [1,0,0] for above -- TODO y_pred or y_true?
+            which_label = tf.argmax(y_true, axis=-1) # e.g. [1,0,0] for above
             # Then, get the weights based on which class each was
             batch_class_weights = tf.gather(class_weights, which_label)
         # If it's just the default 1.0 or some scalar, then don't bother

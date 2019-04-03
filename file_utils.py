@@ -17,7 +17,7 @@ def get_last_int(s, only_one=False):
 
     if only_one:
         assert len(numbers) == 1, \
-            "Could not determine number from last modified file"
+            "get_last_int() should not match more than one integer"
 
     if len(numbers) == 0:
         return None

@@ -197,7 +197,7 @@ class DomainAdaptationModel(tf.keras.Model):
         domain = self.domain_classifier([net, task], grl_lambda=grl_lambda, training=training)
         return task, domain
 
-def task_loss(y_true, y_pred, training):
+def task_loss(y_true, y_pred, training=False):
     """
     Compute loss on the outputs of the task classifier
 
@@ -221,7 +221,7 @@ def task_loss(y_true, y_pred, training):
 
     return cce(y_true, y_pred)
 
-def domain_loss(y_true, y_pred, training):
+def domain_loss(y_true, y_pred):
     """ Compute loss on the outputs of the domain classifier """
     cce = tf.keras.losses.CategoricalCrossentropy()
     return cce(y_true, y_pred)

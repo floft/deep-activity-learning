@@ -112,7 +112,7 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
         task_y_pred, domain_y_pred = model(x, grl_lambda=grl_lambda, training=True)
 
         # Compute loss
-        d_loss = domain_loss(domain_y_true, domain_y_pred, training=True)
+        d_loss = domain_loss(domain_y_true, domain_y_pred)
         loss = task_loss(task_y_true, task_y_pred, training=True) + d_loss
 
         # Update model
@@ -126,7 +126,7 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
         elif FLAGS.generalize:
             for _ in range(FLAGS.max_domain_iters):
                 task_y_pred, domain_y_pred = model(x, grl_lambda=0.0, training=True)
-                d_loss = domain_loss(domain_y_true, domain_y_pred, training=True)
+                d_loss = domain_loss(domain_y_true, domain_y_pred)
                 d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
                 d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
 

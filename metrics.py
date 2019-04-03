@@ -51,11 +51,11 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples=
             domain_y_true = domain_labels(domain, batch_size, num_domains)
 
         # Evaluate model on data
-        task_y_pred, domain_y_pred = model(x, training=False)
+        task_y_pred, domain_y_pred = model(x)
 
         # Calculate losses
-        task_l = task_loss(task_y_true, task_y_pred, training=False)
-        domain_l = domain_loss(domain_y_true, domain_y_pred, training=False)
+        task_l = task_loss(task_y_true, task_y_pred)
+        domain_l = domain_loss(domain_y_true, domain_y_pred)
         total_l = task_l + domain_l
 
         # Do whatever they want with the results of this batch

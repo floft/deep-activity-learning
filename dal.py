@@ -116,9 +116,15 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
         d_loss = domain_loss(domain_y_true, domain_y_pred)
         loss = task_loss(task_y_true, task_y_pred, training=True) + d_loss
 
+        # Only update domain classifier during adaptation or generalization
+        if FLAGS.adapt or FLAGS.generalize:
+            trainable_vars = model.trainable_variables
+        else:
+            trainable_vars = model.trainable_variables_exclude_domain
+
         # Update model
-        grad = tape.gradient(loss, model.trainable_variables)
-        opt.apply_gradients(zip(grad, model.trainable_variables))
+        grad = tape.gradient(loss, trainable_vars)
+        opt.apply_gradients(zip(grad, trainable_vars))
 
         # Update discriminator differently
         if FLAGS.adapt:
@@ -201,9 +207,10 @@ def train(
     checkpoint.restore(tf.train.latest_checkpoint(model_dir))
 
     # Metrics
+    have_target_domain = train_data_b is not None
     writer = tf.summary.create_file_writer(log_dir)
     metrics = Metrics(writer, num_classes, num_domains, config,
-        task_loss, domain_loss)
+        task_loss, domain_loss, have_target_domain)
 
     # Start training
     for i in range(int(global_step), FLAGS.steps+1):

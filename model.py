@@ -19,9 +19,10 @@ flags.DEFINE_integer("units", 50, "Number of LSTM hidden units and VRNN latent v
 flags.DEFINE_integer("layers", 5, "Number of layers for the feature extractor")
 flags.DEFINE_integer("task_layers", 1, "Number of layers for the task classifier")
 flags.DEFINE_integer("domain_layers", 2, "Number of layers for the domain classifier")
+flags.DEFINE_integer("resnet_layers", 2, "Number of layers within a single resnet block")
 
 #flags.mark_flag_as_required("model")
-flags.register_validator("dropout", lambda v: v != 0, message="dropout cannot be zero")
+flags.register_validator("dropout", lambda v: v != 1, message="dropout cannot be 1")
 
 def make_flip_gradient():
     """ Only create constant once """
@@ -60,7 +61,7 @@ class DenseBlock(tf.keras.layers.Layer):
     """
     Dense block with batch norm and dropout
 
-    Note: doing this primarily because dense gives error if we pass
+    Note: doing this rather than Sequential because dense gives error if we pass
     training=True to it
     """
     def __init__(self, units, dropout):
@@ -79,9 +80,13 @@ class DenseBlock(tf.keras.layers.Layer):
 
 class ResnetBlock(tf.keras.layers.Layer):
     """ Block consisting of other blocks but with residual connections """
-    def __init__(self, units, dropout, layers=2, make_block=DenseBlock):
+    def __init__(self, units, dropout, layers=None, make_block=DenseBlock):
         super().__init__()
-        self.blocks = [make_block(units, dropout)]*layers
+
+        if layers is None:
+            layers = FLAGS.resnet_layers
+
+        self.blocks = [make_block(units, dropout) for _ in range(layers)]
         self.add = tf.keras.layers.Add()
 
     def call(self, inputs, training=None):
@@ -95,10 +100,13 @@ class ResnetBlock(tf.keras.layers.Layer):
         return self.add([shortcut, net])
 
 class Classifier(tf.keras.layers.Layer):
-    """ MLP classifier -- multiple DenseBlock followed by dense of size num_classes and softmax """
-    def __init__(self, layers, units, dropout, num_classes, make_block=DenseBlock):
+    """ MLP classifier -- multiple DenseBlock followed by dense of size
+    num_classes and softmax """
+    def __init__(self, layers, units, dropout, num_classes,
+            make_block=DenseBlock):
         super().__init__()
-        self.blocks = [make_block(units, dropout)]*layers
+        assert layers > 0, "must have layers > 0"
+        self.blocks = [make_block(units, dropout) for _ in range(layers-1)]
         self.dense = tf.keras.layers.Dense(num_classes)
         self.act = tf.keras.layers.Activation("softmax")
 
@@ -114,7 +122,8 @@ class Classifier(tf.keras.layers.Layer):
         return net
 
 class DomainClassifier(tf.keras.layers.Layer):
-    """ Classifier() but stopping/flipping gradients and concatenating if generalization """
+    """ Classifier() but stopping/flipping gradients and concatenating if
+    generalization """
     def __init__(self, layers, units, dropout, num_domains):
         super().__init__()
         self.stop_gradient = StopGradient()
@@ -140,11 +149,13 @@ class DomainClassifier(tf.keras.layers.Layer):
 
 class FeatureExtractor(tf.keras.layers.Layer):
     """ Resnet feature extractor """
-    def __init__(self, layers, units, dropout):
+    def __init__(self, layers, units, dropout,
+            make_base_block=DenseBlock, make_res_block=ResnetBlock):
         super().__init__()
+        assert layers > 0, "must have layers > 0"
         # First can't be residual since x isn't of size units
-        self.blocks = [DenseBlock(units, dropout)]
-        self.blocks += [ResnetBlock(units, dropout)]*layers
+        self.blocks = [make_base_block(units, dropout) for _ in range(FLAGS.resnet_layers)]
+        self.blocks += [make_res_block(units, dropout) for _ in range(layers-1)]
 
     def call(self, inputs, training=None):
         net = inputs
@@ -159,7 +170,7 @@ class FlatModel(tf.keras.layers.Layer):
     def __init__(self):
         super().__init__()
         self.flatten = tf.keras.layers.Flatten()
-        self.bn = tf.keras.layers.BatchNormalization()
+        self.bn = tf.keras.layers.BatchNormalization(momentum=0.999)
 
     def call(self, inputs, training=None):
         net = self.flatten(inputs)
@@ -190,6 +201,13 @@ class DomainAdaptationModel(tf.keras.Model):
 
         if FLAGS.model == "flat":
             self.custom_model = FlatModel()
+
+    @property
+    def trainable_variables_exclude_domain(self):
+        """ Same as .trainable_variables but excluding the domain classifier """
+        return self.feature_extractor.trainable_variables \
+            + self.task_classifier.trainable_variables \
+            + self.custom_model.trainable_variables
 
     def call(self, inputs, grl_lambda=1.0, training=None):
         net = self.custom_model(inputs, training=training)
@@ -255,11 +273,16 @@ def make_domain_loss():
     """
     Just CategoricalCrossentropy() but for consistency with make_task_loss()
     """
-    cce = tf.keras.losses.CategoricalCrossentropy()
+    if FLAGS.adapt or FLAGS.generalize:
+        cce = tf.keras.losses.CategoricalCrossentropy()
 
-    def domain_loss(y_true, y_pred):
-        """ Compute loss on the outputs of the domain classifier """
-        return cce(y_true, y_pred)
+        def domain_loss(y_true, y_pred):
+            """ Compute loss on the outputs of the domain classifier """
+            return cce(y_true, y_pred)
+    else:
+        def domain_loss(y_true, y_pred):
+            """ Domain loss only used during adaptation or generalization """
+            return 0
 
     return domain_loss
 

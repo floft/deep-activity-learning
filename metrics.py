@@ -52,7 +52,7 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,
             domain_y_true = domain_labels(domain, batch_size, num_domains)
 
         # Evaluate model on data
-        task_y_pred, domain_y_pred = model(x)
+        task_y_pred, domain_y_pred = model(x, training=False)
 
         # Calculate losses
         task_l = task_loss(task_y_true, task_y_pred, training=False)
@@ -79,7 +79,7 @@ class Metrics:
         loss/{total,task,domain}
     """
     def __init__(self, writer, num_classes, num_domains, config,
-            task_loss, domain_loss):
+            task_loss, domain_loss, target_domain=True):
         self.writer = writer
         self.num_classes = num_classes
         self.num_domains = num_domains
@@ -87,8 +87,9 @@ class Metrics:
         self.datasets = ["training", "validation"]
         self.task_loss = task_loss
         self.domain_loss = domain_loss
+        self.target_domain = target_domain # whether we have just source or both
 
-        if FLAGS.generalize:
+        if not target_domain:
             self.domains = ["source"]
         else:
             self.domains = ["source", "target"]
@@ -222,14 +223,11 @@ class Metrics:
 
     def _run_partial(self, model, data_a, data_b, dataset):
         """ Run the data A/B through the model """
-        if FLAGS.generalize:
-            run_multi_batch(model, data_a, None, None,
-                lambda results: self._process_partial(results, "source", dataset),
-                FLAGS.max_examples, self.task_loss, self.domain_loss)
-        else:
-            run_multi_batch(model, data_a, 0, self.num_domains,
-                lambda results: self._process_partial(results, "source", dataset),
-                FLAGS.max_examples, self.task_loss, self.domain_loss)
+        run_multi_batch(model, data_a, 0, self.num_domains,
+            lambda results: self._process_partial(results, "source", dataset),
+            FLAGS.max_examples, self.task_loss, self.domain_loss)
+
+        if self.target_domain:
             run_multi_batch(model, data_b, 1, self.num_domains,
                 lambda results: self._process_partial(results, "target", dataset),
                 FLAGS.max_examples, self.task_loss, self.domain_loss)
@@ -242,10 +240,12 @@ class Metrics:
 
         # Only one batch is passed in for training, so make it a list so that
         # we can reuse the _run_partial function. However, only if we have data.
-        if data_a is not None:
-            data_a = [data_a]
-        if data_b is not None:
+        data_a = [data_a]
+
+        if self.target_domain:
             data_b = [data_b]
+        else:
+            data_b = None
 
         t = time.time()
         self._run_partial(model, data_a, data_b, dataset)
@@ -258,6 +258,9 @@ class Metrics:
         run out of memory """
         dataset = "validation"
         step = int(step)
+
+        if not self.target_domain:
+            eval_data_b = None
 
         t = time.time()
         self._run_partial(model, eval_data_a, eval_data_b, dataset)

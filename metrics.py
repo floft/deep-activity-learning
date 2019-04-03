@@ -252,6 +252,9 @@ class Metrics:
         # Prepare for next time
         self._reset_states()
 
+        # Make sure we sync to disk
+        self.writer.flush()
+
     def _process_partial(self, results, domain, dataset):
         """ Call this on each batch when running on train/test data (domain A = "source",
         then domain B = "target") to update the partial metric results """

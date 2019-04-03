@@ -240,13 +240,9 @@ def train(
         # Metrics
         if i%FLAGS.log_train_steps == 0:
             metrics.train(model, data_a, data_b, global_step, t)
-            writer.flush()
 
         if i%FLAGS.log_val_steps == 0:
             metrics.test(model, eval_data_a, eval_data_b, global_step)
-            writer.flush()
-
-    writer.flush()
 
     # We're done -- used for hyperparameter tuning
     write_finished(log_dir)

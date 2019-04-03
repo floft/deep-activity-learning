@@ -26,7 +26,6 @@ from tensorflow.python.keras import backend as K
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_enum("model", "flat", ["flat"], "What model type to use")
 flags.DEFINE_float("dropout", 0.05, "Dropout probability")
 flags.DEFINE_integer("units", 50, "Number of LSTM hidden units and VRNN latent variable size")
 flags.DEFINE_integer("layers", 5, "Number of layers for the feature extractor")
@@ -34,7 +33,6 @@ flags.DEFINE_integer("task_layers", 1, "Number of layers for the task classifier
 flags.DEFINE_integer("domain_layers", 2, "Number of layers for the domain classifier")
 flags.DEFINE_integer("resnet_layers", 2, "Number of layers within a single resnet block")
 
-#flags.mark_flag_as_required("model")
 flags.register_validator("dropout", lambda v: v != 1, message="dropout cannot be 1")
 
 def make_flip_gradient():
@@ -138,12 +136,13 @@ class Classifier(tf.keras.layers.Layer):
 class DomainClassifier(tf.keras.layers.Layer):
     """ Classifier() but stopping/flipping gradients and concatenating if
     generalization """
-    def __init__(self, layers, units, dropout, num_domains, **kwargs):
+    def __init__(self, layers, units, dropout, num_domains, generalize, **kwargs):
         super().__init__(**kwargs)
         self.stop_gradient = StopGradient()
         self.flip_gradient = FlipGradient()
         self.concat = tf.keras.layers.Concatenate(axis=1)
         self.classifier = Classifier(layers, units, dropout, num_domains)
+        self.generalize = generalize
 
     def call(self, inputs, grl_lambda=1.0, training=None):
         assert len(inputs) == 2, "Must call DomainClassiferModel(...)([fe, task])"
@@ -153,7 +152,7 @@ class DomainClassifier(tf.keras.layers.Layer):
         # For generalization, we also pass in the task classifier output to the
         # discriminator though forbid gradients from being passed through to
         # the task classifier.
-        if FLAGS.generalize:
+        if self.generalize:
             task_stop_gradient = self.stop_gradient(task)
             net = self.concat([net, task_stop_gradient])
 
@@ -199,25 +198,26 @@ class DomainAdaptationModel(tf.keras.Model):
     argument.
 
     Usage:
-        model = DomainAdaptationModel(num_classes, num_domains)
+        model = DomainAdaptationModel(num_classes, num_domains, "flat",
+            generalize=False)
 
         with tf.GradientTape() as tape:
             task_y_pred, domain_y_pred = model(x, grl_lambda=1.0, training=True)
             ...
     """
-    def __init__(self, num_classes, num_domains, name=None, **kwargs):
-        if name is None:
-            name = "DA_Model_"+FLAGS.model
-        super().__init__(name=name, **kwargs)
+    def __init__(self, num_classes, num_domains, model_name, generalize, **kwargs):
+        super().__init__(**kwargs)
 
         self.feature_extractor = FeatureExtractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
         self.task_classifier = Classifier(FLAGS.task_layers, FLAGS.units,
             FLAGS.dropout, num_classes)
         self.domain_classifier = DomainClassifier(FLAGS.domain_layers, FLAGS.units,
-            FLAGS.dropout, num_domains)
+            FLAGS.dropout, num_domains, generalize)
 
-        if FLAGS.model == "flat":
+        if model_name == "flat":
             self.custom_model = FlatModel()
+        else:
+            raise NotImplementedError("Model name: "+str(model_name))
 
     @property
     def trainable_variables_exclude_domain(self):
@@ -233,7 +233,7 @@ class DomainAdaptationModel(tf.keras.Model):
         domain = self.domain_classifier([net, task], grl_lambda=grl_lambda, training=training)
         return task, domain
 
-def make_task_loss(class_weights):
+def make_task_loss(class_weights, adapt):
     """
     The same as CategoricalCrossentropy() but only on half the batch if doing
     adaptation and in the training phase
@@ -254,7 +254,7 @@ def make_task_loss(class_weights):
         # If doing domain adaptation, then we'll need to ignore the second half of the
         # batch for task classification during training since we don't know the labels
         # of the target data
-        if FLAGS.adapt and training:
+        if adapt and training:
             # Note: this is twice the batch_size in the train() function since we cut
             # it in half there -- this is the sum of both source and target data
             batch_size = tf.shape(y_pred)[0]
@@ -286,11 +286,11 @@ def make_task_loss(class_weights):
 
     return task_loss
 
-def make_domain_loss():
+def make_domain_loss(use_domain_loss):
     """
     Just CategoricalCrossentropy() but for consistency with make_task_loss()
     """
-    if FLAGS.adapt or FLAGS.generalize:
+    if use_domain_loss:
         cce = tf.keras.losses.CategoricalCrossentropy()
 
         def domain_loss(y_true, y_pred):

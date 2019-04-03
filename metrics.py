@@ -38,7 +38,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
 
 def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,
-        task_loss, domain_loss):
+        task_loss, domain_loss, generalize):
     """
     Evaluate model on all the data up to max_examples, even if it takes multiple
     batches. Calls:
@@ -73,7 +73,7 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,
         # Match the number of examples we have since the domain_y_true
         # is meant for generalization, where it's a different number for
         # each home
-        if not FLAGS.generalize:
+        if not generalize:
             domain_y_true = domain_labels(domain, batch_size, num_domains)
 
         # Evaluate model on data
@@ -112,7 +112,7 @@ class Metrics:
         loss/{total,task,domain}
     """
     def __init__(self, log_dir, num_classes, num_domains, config,
-            task_loss, domain_loss, target_domain=True):
+            task_loss, domain_loss, generalize, target_domain=True):
         self.writer = tf.summary.create_file_writer(log_dir)
         self.num_classes = num_classes
         self.num_domains = num_domains
@@ -120,6 +120,7 @@ class Metrics:
         self.datasets = ["training", "validation"]
         self.task_loss = task_loss
         self.domain_loss = domain_loss
+        self.generalize = generalize
         self.target_domain = target_domain # whether we have just source or both
 
         if not target_domain:
@@ -299,12 +300,14 @@ class Metrics:
         """ Run the data A/B through the model """
         run_multi_batch(model, data_a, 0, self.num_domains,
             lambda results: self._process_partial(results, "source", dataset),
-            FLAGS.max_examples, self.task_loss, self.domain_loss)
+            FLAGS.max_examples, self.task_loss, self.domain_loss,
+            self.generalize)
 
         if self.target_domain:
             run_multi_batch(model, data_b, 1, self.num_domains,
                 lambda results: self._process_partial(results, "target", dataset),
-                FLAGS.max_examples, self.task_loss, self.domain_loss)
+                FLAGS.max_examples, self.task_loss, self.domain_loss,
+                self.generalize)
 
     def train(self, model, data_a, data_b, step=None, train_time=None, write=True):
         """

@@ -22,6 +22,7 @@ from checkpoints import CheckpointManager
 
 FLAGS = flags.FLAGS
 
+flags.DEFINE_enum("model", "flat", ["flat"], "What model type to use")
 flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
 flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
 flags.DEFINE_boolean("adapt", False, "Perform domain adaptation on the model")
@@ -45,6 +46,8 @@ flags.DEFINE_float("min_domain_accuracy", 0.5, "If generalize, min domain classi
 flags.DEFINE_float("max_domain_iters", 10, "If generalize, max domain classifier training iterations")
 flags.DEFINE_boolean("debug", False, "Start new log/model/images rather than continuing from previous run")
 flags.DEFINE_integer("debugnum", -1, "Specify exact log/model/images number to use rather than incrementing from last. (Don't pass both this and --debug at the same time.)")
+
+#flags.mark_flag_as_required("model")
 
 def get_directory_names():
     """ Figure out the log and model directory names """
@@ -173,8 +176,8 @@ def train(num_classes, num_domains, input_shape,
         class_weights = calc_class_weights(tfrecords_train_a, input_shape,
             num_classes, num_domains)
 
-    task_loss = make_task_loss(class_weights)
-    domain_loss = make_domain_loss()
+    task_loss = make_task_loss(class_weights, FLAGS.adapt)
+    domain_loss = make_domain_loss(FLAGS.adapt or FLAGS.generalize)
 
     # Above we needed to load with the right number of num_domains, but for
     # adaptation, we only want two: source and target. Default for any
@@ -190,7 +193,8 @@ def train(num_classes, num_domains, input_shape,
     global_step = tf.Variable(0, name="global_step", trainable=False)
 
     # Build our model
-    model = DomainAdaptationModel(num_classes, num_domains)
+    model = DomainAdaptationModel(num_classes, num_domains, FLAGS.model,
+        FLAGS.generalize)
 
     # Optimizers
     opt = tf.keras.optimizers.Adam(FLAGS.lr)
@@ -205,7 +209,7 @@ def train(num_classes, num_domains, input_shape,
     # Metrics
     have_target_domain = train_data_b is not None
     metrics = Metrics(log_dir, num_classes, num_domains, config,
-        task_loss, domain_loss, have_target_domain)
+        task_loss, domain_loss, FLAGS.generalize, have_target_domain)
 
     # Start training
     for i in range(int(global_step), FLAGS.steps+1):

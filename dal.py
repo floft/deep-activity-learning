@@ -199,12 +199,13 @@ def train(
     opt = tf.keras.optimizers.Adam(FLAGS.lr)
     d_opt = tf.keras.optimizers.Adam(FLAGS.lr)
 
-    # Checkpoints
+    # Checkpoints -- max_to_keep=None since we handle it in RemoveOldCheckpoints
     remove_old_checkpoints = RemoveOldCheckpoints(log_dir, model_dir)
-    checkpoint_dir = os.path.join(model_dir, "model.ckpt")
     checkpoint = tf.train.Checkpoint(
         global_step=global_step, opt=opt, d_opt=d_opt, model=model)
-    checkpoint.restore(tf.train.latest_checkpoint(model_dir))
+    checkpoint_manager = tf.train.CheckpointManager(
+        checkpoint, directory=model_dir, max_to_keep=None)
+    checkpoint.restore(checkpoint_manager.latest_checkpoint)
 
     # Metrics
     have_target_domain = train_data_b is not None
@@ -233,7 +234,7 @@ def train(
         # Checkpoints
         if i%FLAGS.model_steps == 0:
             remove_old_checkpoints.before_save()
-            checkpoint.save(file_prefix=checkpoint_dir)
+            checkpoint_manager.save(checkpoint_number=int(global_step-1))
             remove_old_checkpoints.after_save()
 
         # Metrics

@@ -10,6 +10,7 @@ from load_data import domain_labels
 from model import make_task_loss, make_domain_loss
 
 FLAGS = flags.FLAGS
+
 flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
 
 def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,

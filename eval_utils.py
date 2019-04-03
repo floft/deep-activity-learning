@@ -68,11 +68,11 @@ def get_checkpoint(model_dir, step):
     Returns the checkpoint filename and the step we actually loaded (may or
     may not be the one specified, but should be +/- 1)
     """
-    ckpt = os.path.join(model_dir, "model.ckpt-"+str(step))
+    ckpt = os.path.join(model_dir, "ckpt-"+str(step))
 
     if not os.path.exists(ckpt+".index"):
         step -= 1
-        ckpt = os.path.join(model_dir, "model.ckpt-"+str(step))
+        ckpt = os.path.join(model_dir, "ckpt-"+str(step))
 
         assert os.path.exists(ckpt+".index"), \
             "could not find model checkpoint "+ckpt
@@ -99,14 +99,14 @@ def delete_models_except(model_dir, best, last):
         "checkpoint",
         "graph.pbtxt",
         "events.out",
-        "model.ckpt-"+str(best),
-        "model.ckpt-"+str(last),
+        "ckpt-"+str(best),
+        "ckpt-"+str(last),
         # Make sure we don't get rid of the +/- ones if we're off by one
         # with the validation accuracy
-        "model.ckpt-"+str(best-1),
-        "model.ckpt-"+str(last-1),
-        "model.ckpt-"+str(best+1),
-        "model.ckpt-"+str(last+1),
+        "ckpt-"+str(best-1),
+        "ckpt-"+str(last-1),
+        "ckpt-"+str(best+1),
+        "ckpt-"+str(last+1),
     ]
 
     for f in files:

@@ -16,9 +16,9 @@ from load_data import load_tfrecords, domain_labels, get_tfrecord_datasets, \
     ALConfig, TFRecordConfig, calc_class_weights
 from model import DomainAdaptationModel, make_task_loss, make_domain_loss, \
     compute_accuracy
-from eval_utils import RemoveOldCheckpoints
 from file_utils import last_modified_number, write_finished
 from metrics import Metrics
+from checkpoints import CheckpointManager
 
 FLAGS = flags.FLAGS
 
@@ -37,7 +37,7 @@ flags.DEFINE_float("lr_mult", 1.0, "Multiplier for extra discriminator training 
 flags.DEFINE_float("gpumem", 0.1, "Percentage of GPU memory to let TensorFlow use")
 flags.DEFINE_integer("model_steps", 4000, "Save the model every so many steps")
 flags.DEFINE_integer("log_train_steps", 500, "Log training information every so many steps")
-flags.DEFINE_integer("log_val_steps", 4000, "Log validation information every so many steps")
+flags.DEFINE_integer("log_val_steps", 4000, "Log validation information every so many steps (also saves model)")
 flags.DEFINE_boolean("augment", False, "Perform data augmentation (for simple2 dataset)")
 flags.DEFINE_boolean("sample", False, "Only use a small amount of data for training/testing")
 flags.DEFINE_boolean("test", False, "Swap out validation data for real test data (debugging in tensorboard)")
@@ -163,7 +163,7 @@ def train(
     train_data_a_iter = iter(train_data_a) if train_data_a is not None else None
     train_data_b_iter = iter(train_data_b) if train_data_b is not None else None
 
-    # Load all the test data in one batch
+    # Load validation data
     eval_data_a = load_tfrecords(tfrecords_test_a, batch_size, input_shape,
         num_classes, num_domains, evaluation=True)
     eval_data_b = load_tfrecords(tfrecords_test_b, batch_size, input_shape,
@@ -199,13 +199,11 @@ def train(
     opt = tf.keras.optimizers.Adam(FLAGS.lr)
     d_opt = tf.keras.optimizers.Adam(FLAGS.lr)
 
-    # Checkpoints -- max_to_keep=None since we handle it in RemoveOldCheckpoints
-    remove_old_checkpoints = RemoveOldCheckpoints(log_dir, model_dir)
+    # Checkpoints
     checkpoint = tf.train.Checkpoint(
         global_step=global_step, opt=opt, d_opt=d_opt, model=model)
-    checkpoint_manager = tf.train.CheckpointManager(
-        checkpoint, directory=model_dir, max_to_keep=None)
-    checkpoint.restore(checkpoint_manager.latest_checkpoint)
+    checkpoint_manager = CheckpointManager(checkpoint, model_dir, log_dir)
+    checkpoint_manager.restore_latest()
 
     # Metrics
     have_target_domain = train_data_b is not None
@@ -230,18 +228,20 @@ def train(
         if i%10 == 0:
             logging.info("step %d took %f seconds", int(global_step), t)
 
-        # Checkpoints
-        if i%FLAGS.model_steps == 0:
-            remove_old_checkpoints.before_save()
-            checkpoint_manager.save(checkpoint_number=int(global_step-1))
-            remove_old_checkpoints.after_save()
-
-        # Metrics
+        # Metrics on training/validation data
         if i%FLAGS.log_train_steps == 0:
             metrics.train(model, data_a, data_b, global_step, t)
 
+        validation_accuracy = None
         if i%FLAGS.log_val_steps == 0:
-            metrics.test(model, eval_data_a, eval_data_b, global_step)
+            validation_accuracy = metrics.test(model, eval_data_a, eval_data_b, global_step)
+
+        # Checkpoints -- Save either if at the right model step or if we found
+        # a new validation accuracy. If this is better than the previous best
+        # model, we need to make a new checkpoint so we can restore from this
+        # step with the best accuracy.
+        if i%FLAGS.model_steps == 0 or validation_accuracy is not None:
+            checkpoint_manager.save(int(global_step-1), validation_accuracy)
 
     # We're done -- used for hyperparameter tuning
     write_finished(log_dir)

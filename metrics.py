@@ -300,8 +300,12 @@ class Metrics:
         self._write_data(step, "training", t, train_time)
 
     def test(self, model, eval_data_a, eval_data_b, step):
-        """ Evaluate the model on domain A/B but batched to make sure we don't
-        run out of memory """
+        """
+        Evaluate the model on domain A/B but batched to make sure we don't run
+        out of memory
+
+        Returns: source task validation accuracy
+        """
         dataset = "validation"
         step = int(step)
 
@@ -312,4 +316,11 @@ class Metrics:
         self._run_partial(model, eval_data_a, eval_data_b, dataset)
         t = time.time() - t
 
+        # We use the validation accuracy to save the best model, must get before
+        # write since we reset the metrics in _write_data()
+        acc = self.batch_metrics["validation"]["accuracy_task/source/validation"]
+        validation_accuracy = float(acc.result())
+
         self._write_data(step, dataset, t)
+
+        return validation_accuracy

@@ -5,6 +5,8 @@ import os
 import sys
 import pickle
 
+from absl import logging
+
 def save_pickle(filename, data, overwrite=False, debug=True):
     """
     Pickle some data so we don't have to rerun everything
@@ -13,11 +15,9 @@ def save_pickle(filename, data, overwrite=False, debug=True):
         savePickle("data.pickle", (data1, data2))
     """
     if not overwrite and os.path.exists(filename):
-        if debug:
-            print("Skipping,", filename, "exists", file=sys.stderr)
+        logging.debug("Skipping, %s exists", filename)
     else:
-        if debug:
-            print("Pickling", filename, file=sys.stderr)
+        logging.debug("Pickling %s", filename)
 
         if os.path.exists(filename):
             os.rename(filename, filename+".bak")
@@ -26,7 +26,7 @@ def save_pickle(filename, data, overwrite=False, debug=True):
             with open(filename, 'wb') as f:
                 pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
         except Exception as error:
-            print('Error saving', filename, ':', error, file=sys.stderr)
+            logging.error("Error saving %s: %s", filename, error)
 
 def load_pickle(filename, debug=True):
     """
@@ -37,8 +37,7 @@ def load_pickle(filename, debug=True):
             data1, data2 = loadPickle("data.pickle")
     """
     if os.path.exists(filename):
-        if debug:
-            print("Loading", filename, file=sys.stderr)
+        logging.debug("Loading %s", filename)
 
         with open(filename, 'rb') as f:
             data = pickle.load(f)

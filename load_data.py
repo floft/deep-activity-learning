@@ -13,6 +13,7 @@ import pandas as pd
 import tensorflow as tf
 
 from absl import flags
+from absl import logging
 
 FLAGS = flags.FLAGS
 
@@ -438,7 +439,7 @@ def calc_class_weights(tfrecords_train_a, input_shape, num_classes, num_domains)
         total += task_y_true.shape[0]
 
     class_weights = np.power(total/counts, FLAGS.balance_pow)
-    print("Class weights:", class_weights)
+    logging.info("Class weights: "+str(class_weights))
 
     return class_weights
 

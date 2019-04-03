@@ -6,6 +6,8 @@ import sys
 import pathlib
 import tensorflow as tf
 
+from absl import logging
+
 from file_utils import last_modified, get_best_valid_accuracy, write_best_valid_accuracy
 
 def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
@@ -36,9 +38,8 @@ def get_step_from_log(log_dir, last, tag='accuracy_task/source/validation',
         if warn:
             # Skip DataLossErrors since it's probably since we're still writing to
             # the file (i.e. if we run eval during training).
-            print("Warning: DataLossError -- found " + str(len(task_accuracy)) \
-                + ", skipping remainder of file", file=sys.stderr)
-            sys.stderr.flush()
+            logging.warn("DataLossError -- found %d, skipping remainder of file",
+                len(task_accuracy))
 
     # Sort by accuracy -- but only if we didn't choose to use the last model.
     # In that case, the ...[-1] will pick the last one, so all we have to do
@@ -119,7 +120,7 @@ def delete_models_except(model_dir, best, last):
 
         # Otherwise, delete it
         if not found:
-            print("Deleting", f)
+            logging.info("Deleting %s", f)
             os.remove(str(f))
 
 class RemoveOldCheckpoints:

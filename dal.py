@@ -221,7 +221,7 @@ def train(
         t = time.time() - t
 
         if i%10 == 0:
-            print("step", int(global_step), "took", t, "seconds")
+            logging.info("step %d took %f seconds", int(global_step), t)
 
         # Checkpoints
         if i%FLAGS.model_steps == 0:

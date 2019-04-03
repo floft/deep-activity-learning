@@ -80,9 +80,9 @@ class Metrics:
     Loss values:
         loss/{total,task,domain}
     """
-    def __init__(self, writer, num_classes, num_domains, config,
+    def __init__(self, log_dir, num_classes, num_domains, config,
             task_loss, domain_loss, target_domain=True):
-        self.writer = writer
+        self.writer = tf.summary.create_file_writer(log_dir)
         self.num_classes = num_classes
         self.num_domains = num_domains
         self.config = config

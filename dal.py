@@ -209,8 +209,7 @@ def train(
 
     # Metrics
     have_target_domain = train_data_b is not None
-    writer = tf.summary.create_file_writer(log_dir)
-    metrics = Metrics(writer, num_classes, num_domains, config,
+    metrics = Metrics(log_dir, num_classes, num_domains, config,
         task_loss, domain_loss, have_target_domain)
 
     # Start training

@@ -13,7 +13,7 @@ from absl import logging
 from tensorflow.python.framework import config as tfconfig
 
 from load_data import load_tfrecords, domain_labels, get_tfrecord_datasets, \
-    ALConfig, TFRecordConfig
+    ALConfig, TFRecordConfig, calc_class_weights
 from model import DomainAdaptationModel, make_task_loss, make_domain_loss, \
     compute_accuracy
 from eval_utils import RemoveOldCheckpoints
@@ -26,11 +26,12 @@ flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
 flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
 flags.DEFINE_boolean("adapt", False, "Perform domain adaptation on the model")
 flags.DEFINE_boolean("generalize", False, "Perform domain generalization on the model")
+flags.DEFINE_boolean("balance", True, "On high class imbalances, weight the loss function by class")
 flags.DEFINE_integer("fold", 2, "What fold to use from the dataset files")
 flags.DEFINE_string("target", "", "What dataset to use as the target (default none, i.e. blank)")
 flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
 flags.DEFINE_integer("steps", 100000, "Number of training steps to run")
-flags.DEFINE_integer("batch", 1024, "Batch size to use")
+flags.DEFINE_integer("batch", 1024, "Batch size to use for training")
 flags.DEFINE_float("lr", 0.0001, "Learning rate for training")
 flags.DEFINE_float("lr_mult", 1.0, "Multiplier for extra discriminator training learning rate")
 flags.DEFINE_float("gpumem", 0.4, "Percentage of GPU memory to let TensorFlow use")
@@ -162,6 +163,16 @@ def train(
     eval_data_b = load_tfrecords(tfrecords_test_b, batch_size, input_shape,
         num_classes, num_domains, evaluation=True)
 
+     # Loss functions
+    class_weights = 1.0
+
+    if FLAGS.balance:
+        class_weights = calc_class_weights(tfrecords_train_a, input_shape,
+            num_classes, num_domains)
+
+    task_loss = make_task_loss(class_weights)
+    domain_loss = make_domain_loss()
+
     # Above we needed to load with the right number of num_domains, but for
     # adaptation, we only want two: source and target. Default for any
     # non-generalization to also use two since the resulting network is smaller.
@@ -171,10 +182,6 @@ def train(
     # Source domain will be [[1,0], [1,0], ...] and target domain [[0,1], [0,1], ...]
     source_domain = domain_labels(0, batch_size, num_domains)
     target_domain = domain_labels(1, batch_size, num_domains)
-
-    # Loss functions
-    task_loss = make_task_loss()
-    domain_loss = make_domain_loss()
 
     # We need to know where we are in training for the GRL lambda schedule
     global_step = tf.Variable(0, name="global_step", trainable=False)
@@ -195,7 +202,8 @@ def train(
 
     # Metrics
     writer = tf.summary.create_file_writer(log_dir)
-    metrics = Metrics(writer, num_classes, num_domains, config)
+    metrics = Metrics(writer, num_classes, num_domains, config,
+        task_loss, domain_loss)
 
     # Start training
     for i in range(int(global_step), FLAGS.steps+1):

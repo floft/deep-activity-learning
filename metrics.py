@@ -12,7 +12,8 @@ from model import make_task_loss, make_domain_loss
 FLAGS = flags.FLAGS
 flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
 
-def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples=0):
+def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,
+        task_loss, domain_loss):
     """
     Evaluate model on all the data up to max_examples, even if it takes multiple
     batches. Calls:
@@ -23,8 +24,6 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples=
     domain should be either 0 or 1 (if num_domains==2)
     """
     examples = 0
-    task_loss = make_task_loss()
-    domain_loss = make_domain_loss()
 
     if data is None:
         return
@@ -79,12 +78,15 @@ class Metrics:
     Loss values:
         loss/{total,task,domain}
     """
-    def __init__(self, writer, num_classes, num_domains, config):
+    def __init__(self, writer, num_classes, num_domains, config,
+            task_loss, domain_loss):
         self.writer = writer
         self.num_classes = num_classes
         self.num_domains = num_domains
         self.config = config
         self.datasets = ["training", "validation"]
+        self.task_loss = task_loss
+        self.domain_loss = domain_loss
 
         if FLAGS.generalize:
             self.domains = ["source"]
@@ -223,14 +225,14 @@ class Metrics:
         if FLAGS.generalize:
             run_multi_batch(model, data_a, None, None,
                 lambda results: self._process_partial(results, "source", dataset),
-                FLAGS.max_examples)
+                FLAGS.max_examples, self.task_loss, self.domain_loss)
         else:
             run_multi_batch(model, data_a, 0, self.num_domains,
                 lambda results: self._process_partial(results, "source", dataset),
-                FLAGS.max_examples)
+                FLAGS.max_examples, self.task_loss, self.domain_loss)
             run_multi_batch(model, data_b, 1, self.num_domains,
                 lambda results: self._process_partial(results, "target", dataset),
-                FLAGS.max_examples)
+                FLAGS.max_examples, self.task_loss, self.domain_loss)
 
     def train(self, model, data_a, data_b, step, train_time):
         """ Call this once after evaluating on the training data for domain A

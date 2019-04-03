@@ -198,7 +198,7 @@ class DomainAdaptationModel(tf.keras.Model):
         domain = self.domain_classifier([net, task], grl_lambda=grl_lambda, training=training)
         return task, domain
 
-def make_task_loss():
+def make_task_loss(class_weights):
     """
     The same as CategoricalCrossentropy() but only on half the batch if doing
     adaptation and in the training phase
@@ -227,7 +227,27 @@ def make_task_loss():
             y_pred = tf.slice(y_pred, [0, 0], [batch_size // 2, -1])
             y_true = tf.slice(y_true, [0, 0], [batch_size // 2, -1])
 
-        return cce(y_true, y_pred)
+        # Tile the class weights to match the batch size
+        #
+        # e.g., if the weights are [1,2,3,4] and we have a batch of size 2, we get:
+        #  [[1,2,3,4],
+        #   [1,2,3,4]]
+        if not isinstance(class_weights, float) and not isinstance(class_weights, int):
+            # There needs to be one weight for each item in the batch based on
+            # which class that item was predicted to be
+            #
+            # e.g. if we predicted classes [[0,1],[1,0],[1,0]] (i.e. class 1,
+            # class 0, class 0) for a batch size of two, and we have weights
+            # [2,3] we should output: [3,2,2] for the weights for this batch
+            which_label = tf.argmax(y_pred, axis=-1) # e.g. [1,0,0] for above -- TODO y_pred or y_true?
+            # Then, get the weights based on which class each was
+            batch_class_weights = tf.gather(class_weights, which_label)
+        # If it's just the default 1.0 or some scalar, then don't bother
+        # expanding to match the batch size
+        else:
+            batch_class_weights = class_weights
+
+        return cce(y_true, y_pred, sample_weight=batch_class_weights)
 
     return task_loss
 

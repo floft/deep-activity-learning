@@ -12,6 +12,13 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
+from absl import flags
+
+FLAGS = flags.FLAGS
+
+flags.DEFINE_integer("balance_batch", 1024, "Batch size to use for calculating balancing weights")
+flags.DEFINE_float("balance_pow", 1.0, "For increasing balancing, raise the weights to a larger power than 1.0")
+
 def tf_random_ones(x, mask, start, end):
     """
     Set from x[...,start:end] of each selected row (by the mask) to zero and then
@@ -408,6 +415,32 @@ def get_tfrecord_datasets(feature_set, target, fold, sample=False, dir_name="dat
     return tfrecords_train_a, tfrecords_train_b, \
         tfrecords_valid_a, tfrecords_valid_b, \
         tfrecords_test_a, tfrecords_test_b
+
+def calc_class_weights(tfrecords_train_a, input_shape, num_classes, num_domains):
+    """
+    Since we're using a .tfrecord file, we need to load the data and sum
+    how many instances of each class there are in batches.
+    """
+    train_data_a = load_tfrecords(tfrecords_train_a, FLAGS.balance_batch, input_shape,
+        num_classes, num_domains, count=True)
+
+    counts = np.zeros((num_classes,), dtype=np.int32)
+    total = 0
+
+    for _, task_y_true, _ in train_data_a:
+        # Since the labels are one-hot encoded, we can add it to the counts
+        # directly. For example, if we have 3 classes, our counts start out
+        # as [0 0 0], and if we have an example of class 0, i.e. [1 0 0],
+        # if we do [0 0 0]+[1 0 0]=[1 0 0], i.e. we've seen one instance of
+        # class 0 now.
+        # Note: first sum over examples, then we'll add this to "counts"
+        counts += tf.reduce_sum(tf.cast(task_y_true, tf.int32), axis=0)
+        total += task_y_true.shape[0]
+
+    class_weights = np.power(total/counts, FLAGS.balance_pow)
+    print("Class weights:", class_weights)
+
+    return class_weights
 
 class ALConfig:
     """

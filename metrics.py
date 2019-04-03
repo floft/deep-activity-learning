@@ -1,10 +1,10 @@
 """
 Metrics
 
-Update metrics for displaying in TensorBoard
+Update metrics for displaying in TensorBoard during training or evaluation after
+training
 
-Usage:
-    # Create object
+Usage during training (logging to a log file for TensorBoard):
     metrics = Metrics(log_dir, num_classes, num_domains, al_config,
         task_loss_fn, domain_loss_fn, domain_b_data is not None)
 
@@ -13,6 +13,17 @@ Usage:
 
     # Evaluate model on evaluation data, update metrics, save to log file
     validation_accuracy = metrics.test(model, eval_data_a, eval_data_b, step)
+
+Usage after training (evaluating but not logging):
+    metrics = Metrics(log_dir, num_classes, num_domains, al_config,
+        None, None, domain_b_data is not None)
+
+    # Evaluate on datasets
+    metrics.train(model, train_data_a, train_data_b, write=False)
+    metrics.test(model, eval_data_a, eval_data_b, write=False)
+
+    # Get the results
+    results = metrics.results()
 """
 import time
 import tensorflow as tf
@@ -69,9 +80,16 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,
         task_y_pred, domain_y_pred = model(x, training=False)
 
         # Calculate losses
-        task_l = task_loss(task_y_true, task_y_pred, training=False)
-        domain_l = domain_loss(domain_y_true, domain_y_pred)
-        total_l = task_l + domain_l
+        task_l = 0
+        domain_l = 0
+        total_l = 0
+
+        if task_loss is not None:
+            task_l = task_loss(task_y_true, task_y_pred, training=False)
+        if domain_loss is not None:
+            domain_l = domain_loss(domain_y_true, domain_y_pred)
+        if task_loss is not None and domain_loss is not None:
+            total_l = task_l + domain_l
 
         # Do whatever they want with the results of this batch
         after_batch([
@@ -262,9 +280,6 @@ class Metrics:
                 tf.summary.scalar("loss/task", self.loss_task.result(), step=step)
                 tf.summary.scalar("loss/domain", self.loss_domain.result(), step=step)
 
-        # Prepare for next time
-        self._reset_states()
-
         # Make sure we sync to disk
         self.writer.flush()
 
@@ -291,11 +306,16 @@ class Metrics:
                 lambda results: self._process_partial(results, "target", dataset),
                 FLAGS.max_examples, self.task_loss, self.domain_loss)
 
-    def train(self, model, data_a, data_b, step, train_time):
-        """ Call this once after evaluating on the training data for domain A
-        and domain B """
+    def train(self, model, data_a, data_b, step=None, train_time=None, write=True):
+        """
+        Call this once after evaluating on the training data for domain A and
+        domain B
+
+        Note: leave off step and train_time if write=False
+        """
+        self._reset_states()
+
         dataset = "training"
-        step = int(step)
 
         # Only one batch is passed in for training, so make it a list so that
         # we can reuse the _run_partial function. However, only if we have data.
@@ -310,17 +330,24 @@ class Metrics:
         self._run_partial(model, data_a, data_b, dataset)
         t = time.time() - t
 
-        self._write_data(step, "training", t, train_time)
+        if write:
+            assert step is not None and train_time is not None, \
+                "Must pass step and train_time to train() if write=True"
+            step = int(step)
+            self._write_data(step, "training", t, train_time)
 
-    def test(self, model, eval_data_a, eval_data_b, step):
+    def test(self, model, eval_data_a, eval_data_b, step=None, write=True):
         """
         Evaluate the model on domain A/B but batched to make sure we don't run
         out of memory
 
+        Note: leave off step if write=False
+
         Returns: source task validation accuracy
         """
+        self._reset_states()
+
         dataset = "validation"
-        step = int(step)
 
         if not self.target_domain:
             eval_data_b = None
@@ -329,11 +356,30 @@ class Metrics:
         self._run_partial(model, eval_data_a, eval_data_b, dataset)
         t = time.time() - t
 
-        # We use the validation accuracy to save the best model, must get before
-        # write since we reset the metrics in _write_data()
+        # We use the validation accuracy to save the best model
         acc = self.batch_metrics["validation"]["accuracy_task/source/validation"]
         validation_accuracy = float(acc.result())
 
-        self._write_data(step, dataset, t)
+        if write:
+            assert step is not None, "Must pass step to test() if write=True"
+            step = int(step)
+            self._write_data(step, dataset, t)
 
         return validation_accuracy
+
+    def results(self):
+        """ Returns one dictionary of all the current metric results (floats) """
+        results = {}
+
+        for dataset in self.datasets:
+            for key, metric in self.batch_metrics[dataset].items():
+                results[key] = float(metric.result())
+
+            for key, metric in self.per_class_metrics[dataset].items():
+                results[key] = float(metric.result())
+
+        results["loss/total"] = float(self.loss_total.result())
+        results["loss/task"] = float(self.loss_task.result())
+        results["loss/domain"] = float(self.loss_domain.result())
+
+        return results

@@ -53,7 +53,6 @@ class FlipGradient(tf.keras.layers.Layer):
 
 class StopGradient(tf.keras.layers.Layer):
     """ Stop gradient layer """
-    @tf.function
     def call(self, inputs, training=None):
         return tf.stop_gradient(inputs)
 
@@ -206,7 +205,6 @@ def make_task_loss():
     """
     cce = tf.keras.losses.CategoricalCrossentropy()
 
-    @tf.function
     def task_loss(y_true, y_pred, training=None):
         """
         Compute loss on the outputs of the task classifier
@@ -239,14 +237,12 @@ def make_domain_loss():
     """
     cce = tf.keras.losses.CategoricalCrossentropy()
 
-    @tf.function
     def domain_loss(y_true, y_pred):
         """ Compute loss on the outputs of the domain classifier """
         return cce(y_true, y_pred)
 
     return domain_loss
 
-@tf.function
 def compute_accuracy(y_true, y_pred):
     return tf.reduce_mean(input_tensor=tf.cast(tf.equal(
             tf.argmax(y_true, axis=-1),

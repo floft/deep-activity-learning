@@ -53,6 +53,7 @@ class FlipGradient(tf.keras.layers.Layer):
 
 class StopGradient(tf.keras.layers.Layer):
     """ Stop gradient layer """
+    @tf.function
     def call(self, inputs, training=None):
         return tf.stop_gradient(inputs)
 
@@ -96,11 +97,11 @@ class ResnetBlock(tf.keras.layers.Layer):
 
 class Classifier(tf.keras.layers.Layer):
     """ MLP classifier -- multiple DenseBlock followed by dense of size num_classes and softmax """
-    def __init__(self, layers, units, dropout, num_classes, name=None, make_block=DenseBlock):
+    def __init__(self, layers, units, dropout, num_classes, make_block=DenseBlock):
         super().__init__()
         self.blocks = [make_block(units, dropout)]*layers
         self.dense = tf.keras.layers.Dense(num_classes)
-        self.act = tf.keras.layers.Activation("softmax", name=name)
+        self.act = tf.keras.layers.Activation("softmax")
 
     def call(self, inputs, training=None):
         net = inputs
@@ -115,12 +116,12 @@ class Classifier(tf.keras.layers.Layer):
 
 class DomainClassifier(tf.keras.layers.Layer):
     """ Classifier() but stopping/flipping gradients and concatenating if generalization """
-    def __init__(self, layers, units, dropout, num_domains, name=None):
+    def __init__(self, layers, units, dropout, num_domains):
         super().__init__()
         self.stop_gradient = StopGradient()
         self.flip_gradient = FlipGradient()
         self.concat = tf.keras.layers.Concatenate(axis=1)
-        self.classifier = Classifier(layers, units, dropout, num_domains, name)
+        self.classifier = Classifier(layers, units, dropout, num_domains)
 
     def call(self, inputs, grl_lambda=1.0, training=None):
         assert len(inputs) == 2, "Must call DomainClassiferModel(...)([fe, task])"
@@ -165,7 +166,6 @@ class FlatModel(tf.keras.layers.Layer):
         net = self.flatten(inputs)
         return self.bn(net, training=training)
 
-#class DomainAdaptationModel(tf.keras.layers.Layer):
 class DomainAdaptationModel(tf.keras.Model):
     """
     Contains custom model, feature extractor, task classifier, and domain
@@ -185,9 +185,9 @@ class DomainAdaptationModel(tf.keras.Model):
         super().__init__()
         self.feature_extractor = FeatureExtractor(FLAGS.layers, FLAGS.units, FLAGS.dropout)
         self.task_classifier = Classifier(FLAGS.task_layers, FLAGS.units,
-            FLAGS.dropout, num_classes, name="task_output")
+            FLAGS.dropout, num_classes)
         self.domain_classifier = DomainClassifier(FLAGS.domain_layers, FLAGS.units,
-            FLAGS.dropout, num_domains, name="domain_output")
+            FLAGS.dropout, num_domains)
 
         if FLAGS.model == "flat":
             self.custom_model = FlatModel()
@@ -206,6 +206,7 @@ def make_task_loss():
     """
     cce = tf.keras.losses.CategoricalCrossentropy()
 
+    @tf.function
     def task_loss(y_true, y_pred, training=None):
         """
         Compute loss on the outputs of the task classifier
@@ -238,12 +239,14 @@ def make_domain_loss():
     """
     cce = tf.keras.losses.CategoricalCrossentropy()
 
+    @tf.function
     def domain_loss(y_true, y_pred):
         """ Compute loss on the outputs of the domain classifier """
         return cce(y_true, y_pred)
 
     return domain_loss
 
+@tf.function
 def compute_accuracy(y_true, y_pred):
     return tf.reduce_mean(input_tensor=tf.cast(tf.equal(
             tf.argmax(y_true, axis=-1),

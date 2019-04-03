@@ -81,9 +81,8 @@ def get_directory_names():
 
     return model_dir, log_dir
 
-#@tf.function
 def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
-        source_domain, target_domain):
+        source_domain, target_domain, task_loss, domain_loss):
     """ Compiled training step that we call many times """
     if data_a is not None:
         data_batch_a, labels_batch_a, domains_batch_a = data_a
@@ -112,10 +111,6 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
         # Run model
         task_y_pred, domain_y_pred = model(x, grl_lambda=grl_lambda, training=True)
 
-        # Make loss functions TODO
-        task_loss = make_task_loss()
-        domain_loss = make_domain_loss()
-
         # Compute loss
         d_loss = domain_loss(domain_y_true, domain_y_pred)
         loss = task_loss(task_y_true, task_y_pred, training=True) + d_loss
@@ -139,9 +134,6 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
                 domain_acc = compute_accuracy(domain_y_true, domain_y_pred)
                 if domain_acc > FLAGS.min_domain_accuracy:
                     break
-
-def train_fit():
-    pass
 
 def train(
         num_features, num_classes, num_domains, input_shape,
@@ -180,6 +172,10 @@ def train(
     source_domain = domain_labels(0, batch_size, num_domains)
     target_domain = domain_labels(1, batch_size, num_domains)
 
+    # Loss functions
+    task_loss = make_task_loss()
+    domain_loss = make_domain_loss()
+
     # We need to know where we are in training for the GRL lambda schedule
     global_step = tf.Variable(0, name="global_step", trainable=False)
 
@@ -189,20 +185,6 @@ def train(
     # Optimizers
     opt = tf.keras.optimizers.Adam(FLAGS.lr)
     d_opt = tf.keras.optimizers.Adam(FLAGS.lr)
-
-    # TODO trying this
-    data = load_tfrecords_test(tfrecords_train_a, batch_size, input_shape,
-        num_classes, num_domains, data_augmentation=FLAGS.augment)
-    model.compile(optimizer=opt, loss={
-        "output_1": make_task_loss(),
-        "output_2": make_domain_loss(),
-    }, loss_weights={
-        "output_1": 1.0,
-        "output_2": 1.0,
-    }, metrics=["accuracy"])
-    model.fit(data, epochs=100, verbose=1)
-    tf.keras.utils.plot_model(model, 'multi_input_and_output_model.png', show_shapes=True)
-    exit()
 
     # Checkpoints
     remove_old_checkpoints = RemoveOldCheckpoints(log_dir, model_dir)
@@ -226,7 +208,7 @@ def train(
 
         t = time.time()
         train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
-            source_domain, target_domain)
+            source_domain, target_domain, task_loss, domain_loss)
         global_step.assign_add(1)
         t = time.time() - t
 

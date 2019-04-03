@@ -14,7 +14,8 @@ from tensorflow.python.framework import config as tfconfig
 
 from load_data import load_tfrecords, domain_labels, get_tfrecord_datasets, \
     ALConfig, TFRecordConfig
-from model import DomainAdaptationModel, task_loss, domain_loss, compute_accuracy
+from model import DomainAdaptationModel, make_task_loss, make_domain_loss, \
+    compute_accuracy
 from eval_utils import RemoveOldCheckpoints
 from file_utils import last_modified_number, write_finished
 from metrics import Metrics
@@ -110,6 +111,15 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
 
         # Run model
         task_y_pred, domain_y_pred = model(x, grl_lambda=grl_lambda, training=True)
+
+        # model.compile(optimizer=opt, losses={
+        #     "task_output": make_task_loss(),
+        #     "domain_output": make_domain_loss(),
+        # })
+
+        # Make loss functions TODO
+        task_loss = make_task_loss()
+        domain_loss = make_domain_loss()
 
         # Compute loss
         d_loss = domain_loss(domain_y_true, domain_y_pred)

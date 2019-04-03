@@ -7,7 +7,7 @@ import tensorflow as tf
 from absl import flags
 
 from load_data import domain_labels
-from model import task_loss, domain_loss
+from model import make_task_loss, make_domain_loss
 
 FLAGS = flags.FLAGS
 flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
@@ -23,6 +23,8 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples=
     domain should be either 0 or 1 (if num_domains==2)
     """
     examples = 0
+    task_loss = make_task_loss()
+    domain_loss = make_domain_loss()
 
     if data is None:
         return
@@ -54,7 +56,7 @@ def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples=
         task_y_pred, domain_y_pred = model(x)
 
         # Calculate losses
-        task_l = task_loss(task_y_true, task_y_pred)
+        task_l = task_loss(task_y_true, task_y_pred, training=False)
         domain_l = domain_loss(domain_y_true, domain_y_pred)
         total_l = task_l + domain_l
 

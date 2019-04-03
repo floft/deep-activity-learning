@@ -7,7 +7,9 @@ layer.
 """
 import numpy as np
 import tensorflow as tf
+
 from absl import flags
+from tensorflow.python.keras import backend as K
 
 FLAGS = flags.FLAGS
 
@@ -197,34 +199,50 @@ class DomainAdaptationModel(tf.keras.Model):
         domain = self.domain_classifier([net, task], grl_lambda=grl_lambda, training=training)
         return task, domain
 
-def task_loss(y_true, y_pred, training=False):
+def make_task_loss():
     """
-    Compute loss on the outputs of the task classifier
-
-    Note: domain classifier can use normal tf.keras.losses.CategoricalCrossentropy
-    but for the task loss when doing adaptation we need to ignore the second half
-    of the batch since this is unsupervised
+    The same as CategoricalCrossentropy() but only on half the batch if doing
+    adaptation and in the training phase
     """
-    # Basically the same but only on half the batch
     cce = tf.keras.losses.CategoricalCrossentropy()
 
-    # If doing domain adaptation, then we'll need to ignore the second half of the
-    # batch for task classification during training since we don't know the labels
-    # of the target data
-    if FLAGS.adapt and training:
-        # Note: this is twice the batch_size in the train() function since we cut
-        # it in half there -- this is the sum of both source and target data
-        batch_size = tf.shape(y_pred)[0]
+    def task_loss(y_true, y_pred, training=None):
+        """
+        Compute loss on the outputs of the task classifier
 
-        y_pred = tf.slice(y_pred, [0, 0], [batch_size // 2, -1])
-        y_true = tf.slice(y_true, [0, 0], [batch_size // 2, -1])
+        Note: domain classifier can use normal tf.keras.losses.CategoricalCrossentropy
+        but for the task loss when doing adaptation we need to ignore the second half
+        of the batch since this is unsupervised
+        """
+        if training is None:
+            training = K.learning_phase()
 
-    return cce(y_true, y_pred)
+        # If doing domain adaptation, then we'll need to ignore the second half of the
+        # batch for task classification during training since we don't know the labels
+        # of the target data
+        if FLAGS.adapt and training:
+            # Note: this is twice the batch_size in the train() function since we cut
+            # it in half there -- this is the sum of both source and target data
+            batch_size = tf.shape(y_pred)[0]
 
-def domain_loss(y_true, y_pred):
-    """ Compute loss on the outputs of the domain classifier """
+            y_pred = tf.slice(y_pred, [0, 0], [batch_size // 2, -1])
+            y_true = tf.slice(y_true, [0, 0], [batch_size // 2, -1])
+
+        return cce(y_true, y_pred)
+
+    return task_loss
+
+def make_domain_loss():
+    """
+    Just CategoricalCrossentropy() but for consistency with make_task_loss()
+    """
     cce = tf.keras.losses.CategoricalCrossentropy()
-    return cce(y_true, y_pred)
+
+    def domain_loss(y_true, y_pred):
+        """ Compute loss on the outputs of the domain classifier """
+        return cce(y_true, y_pred)
+
+    return domain_loss
 
 def compute_accuracy(y_true, y_pred):
     return tf.reduce_mean(input_tensor=tf.cast(tf.equal(

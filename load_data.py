@@ -234,54 +234,15 @@ def one_hot(x, y, num_classes, index_one=False):
 
     return x, y
 
-def tf_domain_labels(label, batch_size, num_domains=2):
-    """ Generate one-hot encoded labels for which domain data is from (using TensorFlow) """
-    return tf.tile(tf.one_hot([0], depth=num_domains), [batch_size,1])
-
 def domain_labels(label, batch_size, num_domains=2):
     """ Generate one-hot encoded labels for which domain data is from (using numpy) """
     return np.tile(np.eye(num_domains)[label], [batch_size,1])
-
-def shuffle_together(a, b, seed=None):
-    """ Shuffle two lists in unison https://stackoverflow.com/a/13343383/2698494 """
-    assert len(a) == len(b), "a and b must be the same length"
-    rand = random.Random(seed)
-    combined = list(zip(a, b))
-    rand.shuffle(combined)
-    return zip(*combined)
-
-def shuffle_together_np(a, b, seed=None):
-    """ Shuffle two numpy arrays together https://stackoverflow.com/a/4602224/2698494"""
-    assert len(a) == len(b), "a and b must be the same length"
-    rand = np.random.RandomState(seed)
-    p = rand.permutation(len(a))
-    return a[p], b[p]
 
 def shuffle_together_calc(length, seed=None):
     """ Generate indices of numpy array shuffling, then do x[p] """
     rand = np.random.RandomState(seed)
     p = rand.permutation(length)
     return p
-
-def load_hdf5_full(filename):
-    """
-    Load x,y data from hdf5 file -- create dictionary of all data in file
-    """
-    d = {
-            "features_train": [],
-            "features_test": [],
-            "labels_train": [],
-            "labels_test": [],
-        }
-    data = h5py.File(filename, "r")
-
-    for fold in data.keys():
-        d["features_train"].append(np.array(data[fold]["features_train"]))
-        d["features_test"].append(np.array(data[fold]["features_test"]))
-        d["labels_train"].append(np.array(data[fold]["labels_train"]))
-        d["labels_test"].append(np.array(data[fold]["labels_test"]))
-
-    return d
 
 def load_hdf5(filename):
     """
@@ -307,24 +268,6 @@ def load_single_fold(filename, fold=None):
 
     return train_data, train_labels, \
         test_data, test_labels
-
-def load_data_home(feature_set="simple", dir_name="datasets", A="half1", B="hh117"):
-    """
-    Load hh/half1.hdf5 as domain A and hh/half2.hdf5 as domain B, use the last
-    fold for now
-    """
-    train_data_a, train_labels_a, \
-    test_data_a, test_labels_a = \
-        load_single_fold(os.path.join(dir_name, feature_set+"_"+A+".hdf5"))
-
-    train_data_b, train_labels_b, \
-    test_data_b, test_labels_b = \
-        load_single_fold(os.path.join(dir_name, feature_set+"_"+B+".hdf5"))
-
-    return train_data_a, train_labels_a, \
-        test_data_a, test_labels_a, \
-        train_data_b, train_labels_b, \
-        test_data_b, test_labels_b
 
 def load_data_home_da(fold, target, feature_set, dir_name="preprocessing/windows"):
     """

@@ -39,7 +39,7 @@ def run_multi_batch(data, *args, **kwargs):
     for x, task_y_true, domain_y_true in data:
         run_single_batch(x, task_y_true, domain_y_true, *args, **kwargs)
 
-#@tf.function
+@tf.function
 def run_single_batch(x, task_y_true, domain_y_true, model, domain, num_domains,
         after_batch, task_loss, domain_loss, generalize):
     """
@@ -49,6 +49,7 @@ def run_single_batch(x, task_y_true, domain_y_true, model, domain, num_domains,
 
     Domain should be either 0 or 1 (if num_domains==2).
     """
+    # Note: if you do x.shape[0] here, it'll give None on last batch and error
     batch_size = tf.shape(x)[0]
 
     # Match the number of examples we have since the domain_y_true
@@ -147,6 +148,14 @@ class Metrics:
         self.loss_total = tf.keras.metrics.Mean(name="loss/total")
         self.loss_task = tf.keras.metrics.Mean(name="loss/task")
         self.loss_domain = tf.keras.metrics.Mean(name="loss/domain")
+
+        # We need to create these lambda functions only once so that tf.function
+        # doesn't keep recompiling every time we update the metrics
+        self._process_partial_lambdas = {}
+        for dataset in self.datasets:
+            for domain in self.domains:
+                self._process_partial_lambdas["%s/%s"%(domain, dataset)] = \
+                    lambda results: self._process_partial(results, domain, dataset)
 
     def _reset_states(self, dataset):
         """ Reset states of all the Keras metrics """
@@ -275,12 +284,12 @@ class Metrics:
         should both be of type tf.data.Dataset """
         if data_a is not None:
             run_multi_batch(data_a, model, 0, self.num_domains,
-                lambda results: self._process_partial(results, "source", dataset),
+                self._process_partial_lambdas["source/%s"%dataset],
                 self.task_loss, self.domain_loss, self.generalize)
 
         if self.target_domain and data_b is not None:
             run_multi_batch(data_b, model, 1, self.num_domains,
-                lambda results: self._process_partial(results, "target", dataset),
+                self._process_partial_lambdas["target/%s"%dataset],
                 self.task_loss, self.domain_loss, self.generalize)
 
     def _run_batch(self, model, data_a, data_b, dataset):
@@ -288,12 +297,12 @@ class Metrics:
         should both be a tuple of (x, task_y_true, domain_y_true) """
         if data_a is not None:
             run_single_batch(*data_a, model, 0, self.num_domains,
-                lambda results: self._process_partial(results, "source", dataset),
+                self._process_partial_lambdas["source/%s"%dataset],
                 self.task_loss, self.domain_loss, self.generalize)
 
         if self.target_domain and data_b is not None:
             run_single_batch(*data_b, model, 1, self.num_domains,
-                lambda results: self._process_partial(results, "target", dataset),
+                self._process_partial_lambdas["target/%s"%dataset],
                 self.task_loss, self.domain_loss, self.generalize)
 
     def train(self, model, data_a, data_b, step=None, train_time=None, evaluation=False):

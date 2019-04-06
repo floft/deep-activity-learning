@@ -33,12 +33,14 @@ flags.DEFINE_string("target", "", "What dataset to use as the target (default no
 flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
 flags.DEFINE_integer("steps", 100000, "Number of training steps to run")
 flags.DEFINE_integer("batch", 1024, "Batch size to use for training")
+flags.DEFINE_integer("eval_batch", 16384, "Batch size to use for evaluation")
 flags.DEFINE_float("lr", 0.0001, "Learning rate for training")
 flags.DEFINE_float("lr_mult", 1.0, "Multiplier for extra discriminator training learning rate")
 flags.DEFINE_float("gpumem", 0.1, "Percentage of GPU memory to let TensorFlow use")
 flags.DEFINE_integer("model_steps", 4000, "Save the model every so many steps")
 flags.DEFINE_integer("log_train_steps", 500, "Log training information every so many steps")
 flags.DEFINE_integer("log_val_steps", 4000, "Log validation information every so many steps (also saves model)")
+flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
 flags.DEFINE_boolean("augment", False, "Perform data augmentation (for simple2 dataset)")
 flags.DEFINE_boolean("sample", False, "Only use a small amount of data for training/testing")
 flags.DEFINE_boolean("test", False, "Swap out validation data for real test data (debugging in tensorboard)")
@@ -91,63 +93,65 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
     if data_b is not None:
         data_batch_b, labels_batch_b, domains_batch_b = data_b
 
-    with tf.GradientTape() as tape, tf.GradientTape() as d_tape:
-        # Concatenate for adaptation - concatenate source labels with all-zero
-        # labels for target since we can't use the target labels during
-        # unsupervised domain adaptation
-        if FLAGS.adapt:
-            assert data_a is not None, "Adaptation requires both datasets A and B"
-            assert data_b is not None, "Adaptation requires both datasets A and B"
-            x = np.concatenate((data_batch_a, data_batch_b), axis=0)
-            task_y_true = np.concatenate((labels_batch_a, np.zeros(labels_batch_b.shape)), axis=0)
-            domain_y_true = np.concatenate((source_domain, target_domain), axis=0)
-        elif FLAGS.generalize:
-            x = data_batch_a
-            task_y_true = labels_batch_a
-            domain_y_true = domains_batch_a
-        else:
-            x = data_batch_a
-            task_y_true = labels_batch_a
-            domain_y_true = source_domain
+    # Concatenate for adaptation - concatenate source labels with all-zero
+    # labels for target since we can't use the target labels during
+    # unsupervised domain adaptation
+    if FLAGS.adapt:
+        assert data_a is not None, "Adaptation requires both datasets A and B"
+        assert data_b is not None, "Adaptation requires both datasets A and B"
+        x = np.concatenate((data_batch_a, data_batch_b), axis=0)
+        task_y_true = np.concatenate((labels_batch_a, np.zeros(labels_batch_b.shape)), axis=0)
+        domain_y_true = np.concatenate((source_domain, target_domain), axis=0)
+    elif FLAGS.generalize:
+        x = data_batch_a
+        task_y_true = labels_batch_a
+        domain_y_true = domains_batch_a
+    else:
+        x = data_batch_a
+        task_y_true = labels_batch_a
+        domain_y_true = source_domain
 
-        # Run model
+    # Run data through model and compute loss
+    with tf.GradientTape() as tape, tf.GradientTape() as d_tape:
         task_y_pred, domain_y_pred = model(x, grl_lambda=grl_lambda, training=True)
 
-        # Compute loss
         d_loss = domain_loss(domain_y_true, domain_y_pred)
         loss = task_loss(task_y_true, task_y_pred, training=True) + d_loss
 
-        # Only update domain classifier during adaptation or generalization
-        if FLAGS.adapt or FLAGS.generalize:
-            trainable_vars = model.trainable_variables
-        else:
-            trainable_vars = model.trainable_variables_exclude_domain
+    # Only update domain classifier during adaptation or generalization
+    if FLAGS.adapt or FLAGS.generalize:
+        trainable_vars = model.trainable_variables
+    else:
+        trainable_vars = model.trainable_variables_exclude_domain
 
-        # Update model
-        grad = tape.gradient(loss, trainable_vars)
-        opt.apply_gradients(zip(grad, trainable_vars))
+    # Update model
+    grad = tape.gradient(loss, trainable_vars)
+    opt.apply_gradients(zip(grad, trainable_vars))
 
-        # Update discriminator differently
-        if FLAGS.adapt:
-            d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
-            d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
-        elif FLAGS.generalize:
-            for _ in range(FLAGS.max_domain_iters):
+    # Update discriminator
+    if FLAGS.adapt:
+        d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
+        d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
+    elif FLAGS.generalize:
+        for _ in range(FLAGS.max_domain_iters):
+            with tf.GradientTape() as d_tape:
                 task_y_pred, domain_y_pred = model(x, grl_lambda=0.0, training=True)
                 d_loss = domain_loss(domain_y_true, domain_y_pred)
-                d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
-                d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
 
-                # Break if high enough accuracy
-                domain_acc = compute_accuracy(domain_y_true, domain_y_pred)
-                if domain_acc > FLAGS.min_domain_accuracy:
-                    break
+            d_grad = d_tape.gradient(d_loss, model.domain_classifier.trainable_variables)
+            d_opt.apply_gradients(zip(d_grad, model.domain_classifier.trainable_variables))
+
+            # Break if high enough accuracy
+            domain_acc = compute_accuracy(domain_y_true, domain_y_pred)
+            if domain_acc > FLAGS.min_domain_accuracy:
+                break
 
 def train(num_classes, num_domains, input_shape,
         tfrecords_train_a, tfrecords_train_b,
         tfrecords_test_a, tfrecords_test_b,
         config, model_dir, log_dir):
     batch_size = FLAGS.batch
+    eval_batch_size = FLAGS.eval_batch
 
     # For adaptation, we'll be concatenating together half source and half target
     # data, so to keep the batch_size about the same, we'll cut it in half
@@ -164,10 +168,10 @@ def train(num_classes, num_domains, input_shape,
     train_data_b_iter = iter(train_data_b) if train_data_b is not None else None
 
     # Load validation data
-    eval_data_a = load_tfrecords(tfrecords_test_a, batch_size, input_shape,
-        num_classes, num_domains, evaluation=True)
-    eval_data_b = load_tfrecords(tfrecords_test_b, batch_size, input_shape,
-        num_classes, num_domains, evaluation=True)
+    eval_data_a = load_tfrecords(tfrecords_test_a, eval_batch_size, input_shape,
+        num_classes, num_domains, evaluation=True, max_examples=FLAGS.max_examples)
+    eval_data_b = load_tfrecords(tfrecords_test_b, eval_batch_size, input_shape,
+        num_classes, num_domains, evaluation=True, max_examples=FLAGS.max_examples)
 
      # Loss functions
     class_weights = 1.0

@@ -149,8 +149,11 @@ def perform_data_augmentation(x, zero_prob=0.05, time_prob=0.05,
 
 def load_tfrecords(filenames, batch_size, input_shape, num_classes, num_domains,
         evaluation=False, count=False, buffer_size=10000, eval_shuffle_seed=0,
-        prefetch_buffer_size=1, data_augmentation=False):
-    """ Load data from .tfrecord files (requires less memory but more disk space) """
+        prefetch_buffer_size=1, data_augmentation=False, max_examples=0):
+    """
+    Load data from .tfrecord files (requires less memory but more disk space)
+    max_examples=0 -- no limit on the number of examples
+    """
     if len(filenames) == 0:
         return None
 
@@ -181,6 +184,10 @@ def load_tfrecords(filenames, batch_size, input_shape, num_classes, num_domains,
     dataset = files.interleave(
         lambda x: tf.data.TFRecordDataset(x, compression_type='GZIP').prefetch(100),
         cycle_length=len(filenames), block_length=1)
+
+    # If desired, take the first max_examples examples
+    if max_examples != 0:
+        dataset = dataset.take(max_examples)
 
     if count: # only count, so no need to shuffle
         pass

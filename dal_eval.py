@@ -29,12 +29,13 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("modeldir", "models", "Directory for saving model files")
 flags.DEFINE_string("logdir", "logs", "Directory for saving log files")
 flags.DEFINE_enum("features", "al", ["al", "simple", "simple2"], "What type of features to use")
-flags.DEFINE_integer("batch", 1024, "Batch size to use for evaluation")
+flags.DEFINE_integer("eval_batch", 16384, "Batch size to use for evaluation")
 flags.DEFINE_float("gpumem", 0.8, "Percentage of GPU memory to let TensorFlow use (divided among jobs)")
 flags.DEFINE_string("match", "*-*-*", "String matching to determine which logs/models to process")
 flags.DEFINE_integer("jobs", 4, "Number of TensorFlow jobs to run at once")
 flags.DEFINE_integer("gpus", 1, "Split jobs between GPUs -- overrides jobs (1 == run multiple jobs on first GPU)")
 flags.DEFINE_boolean("last", False, "Use last model rather than one with best validation set performance")
+flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
 
 def get_gpus():
     """
@@ -182,14 +183,14 @@ def process_model(log_dir, model_dir, target, model_name, fold, adaptation,
     tfrecords_train_b += tfrecords_valid_b
 
     # Load datasets
-    train_data_a = load_tfrecords(tfrecords_train_a, FLAGS.batch, input_shape,
-        num_classes, num_domains, evaluation=True)
-    train_data_b = load_tfrecords(tfrecords_train_b, FLAGS.batch, input_shape,
-        num_classes, num_domains, evaluation=True)
-    eval_data_a = load_tfrecords(tfrecords_test_a, FLAGS.batch, input_shape,
-        num_classes, num_domains, evaluation=True)
-    eval_data_b = load_tfrecords(tfrecords_test_b, FLAGS.batch, input_shape,
-        num_classes, num_domains, evaluation=True)
+    train_data_a = load_tfrecords(tfrecords_train_a, FLAGS.eval_batch, input_shape,
+        num_classes, num_domains, evaluation=True, max_examples=FLAGS.max_examples)
+    train_data_b = load_tfrecords(tfrecords_train_b, FLAGS.eval_batch, input_shape,
+        num_classes, num_domains, evaluation=True, max_examples=FLAGS.max_examples)
+    eval_data_a = load_tfrecords(tfrecords_test_a, FLAGS.eval_batch, input_shape,
+        num_classes, num_domains, evaluation=True, max_examples=FLAGS.max_examples)
+    eval_data_b = load_tfrecords(tfrecords_test_b, FLAGS.eval_batch, input_shape,
+        num_classes, num_domains, evaluation=True, max_examples=FLAGS.max_examples)
 
     # Above we needed to load with the right number of num_domains, but for
     # adaptation, we only want two: source and target

@@ -30,71 +30,46 @@ import tensorflow as tf
 
 from absl import flags
 
-from load_data import domain_labels
+from load_data import tf_domain_labels
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_integer("max_examples", 0, "Max number of examples to evaluate for validation (default 0, i.e. all)")
+def run_multi_batch(data, *args, **kwargs):
+    """ Evaluate model on all batches in the data (data is a tf.data.Dataset) """
+    for x, task_y_true, domain_y_true in data:
+        run_single_batch(x, task_y_true, domain_y_true, *args, **kwargs)
 
-def run_multi_batch(model, data, domain, num_domains, after_batch, max_examples,
-        task_loss, domain_loss, generalize):
+#@tf.function
+def run_single_batch(x, task_y_true, domain_y_true, model, domain, num_domains,
+        after_batch, task_loss, domain_loss, generalize):
     """
-    Evaluate model on all the data up to max_examples, even if it takes multiple
-    batches. Calls:
+    Run a batch of data through the model. Call after_batch() afterwards:
         after_batch([labels_batch_a, task_y_pred, domains_batch_a, domain_y_pred,
             total_loss, task_loss, domain_loss])
 
-    after each batch is completed. Set max_examples==0 for evaluating on all data.
-    domain should be either 0 or 1 (if num_domains==2)
+    Domain should be either 0 or 1 (if num_domains==2).
     """
-    examples = 0
+    batch_size = tf.shape(x)[0]
 
-    if data is None:
-        return
+    # Match the number of examples we have since the domain_y_true
+    # is meant for generalization, where it's a different number for
+    # each home
+    if not generalize:
+        domain_y_true = tf_domain_labels(domain, batch_size, num_domains)
 
-    for x, task_y_true, domain_y_true in data:
-        # Make sure we don't go over the desired number of examples
-        # But, only if we don't want to evaluate all examples (i.e. if
-        # max_examples == 0)
-        if max_examples != 0 and examples >= max_examples:
-            break
+    # Evaluate model on data
+    task_y_pred, domain_y_pred = model(x, training=False)
 
-        if max_examples != 0:
-            diff = max_examples - examples
+    # Calculate losses
+    task_l = task_loss(task_y_true, task_y_pred, training=False)
+    domain_l = domain_loss(domain_y_true, domain_y_pred)
+    total_l = task_l + domain_l
 
-            if examples + x.shape[0] > max_examples:
-                x = x[:diff]
-                task_y_true = task_y_true[:diff]
-
-        batch_size = x.shape[0]
-        examples += batch_size
-
-        # Match the number of examples we have since the domain_y_true
-        # is meant for generalization, where it's a different number for
-        # each home
-        if not generalize:
-            domain_y_true = domain_labels(domain, batch_size, num_domains)
-
-        # Evaluate model on data
-        task_y_pred, domain_y_pred = model(x, training=False)
-
-        # Calculate losses
-        task_l = 0
-        domain_l = 0
-        total_l = 0
-
-        if task_loss is not None:
-            task_l = task_loss(task_y_true, task_y_pred, training=False)
-        if domain_loss is not None:
-            domain_l = domain_loss(domain_y_true, domain_y_pred)
-        if task_loss is not None and domain_loss is not None:
-            total_l = task_l + domain_l
-
-        # Do whatever they want with the results of this batch
-        after_batch([
-            task_y_true, task_y_pred, domain_y_true, domain_y_pred,
-            total_l, task_l, domain_l,
-        ])
+    # Do whatever they want with the results of this batch
+    after_batch([
+        task_y_true, task_y_pred, domain_y_true, domain_y_pred,
+        total_l, task_l, domain_l,
+    ])
 
 class Metrics:
     """
@@ -117,8 +92,8 @@ class Metrics:
         self.num_domains = num_domains
         self.config = config
         self.datasets = ["training", "validation"]
-        self.task_loss = task_loss
-        self.domain_loss = domain_loss
+        self.task_loss = task_loss if task_loss is not None else lambda y_true, y_pred, training: 0
+        self.domain_loss = domain_loss if domain_loss is not None else lambda y_true, y_pred: 0
         self.generalize = generalize
         self.target_domain = target_domain # whether we have just source or both
 
@@ -296,17 +271,30 @@ class Metrics:
             self._process_losses(results)
 
     def _run_partial(self, model, data_a, data_b, dataset):
-        """ Run the data A/B through the model """
-        run_multi_batch(model, data_a, 0, self.num_domains,
-            lambda results: self._process_partial(results, "source", dataset),
-            FLAGS.max_examples, self.task_loss, self.domain_loss,
-            self.generalize)
+        """ Run all the data A/B through the model -- data_a and data_b
+        should both be of type tf.data.Dataset """
+        if data_a is not None:
+            run_multi_batch(data_a, model, 0, self.num_domains,
+                lambda results: self._process_partial(results, "source", dataset),
+                self.task_loss, self.domain_loss, self.generalize)
 
-        if self.target_domain:
-            run_multi_batch(model, data_b, 1, self.num_domains,
+        if self.target_domain and data_b is not None:
+            run_multi_batch(data_b, model, 1, self.num_domains,
                 lambda results: self._process_partial(results, "target", dataset),
-                FLAGS.max_examples, self.task_loss, self.domain_loss,
-                self.generalize)
+                self.task_loss, self.domain_loss, self.generalize)
+
+    def _run_batch(self, model, data_a, data_b, dataset):
+        """ Run a single batch of A/B data through the model -- data_a and data_b
+        should both be a tuple of (x, task_y_true, domain_y_true) """
+        if data_a is not None:
+            run_single_batch(*data_a, model, 0, self.num_domains,
+                lambda results: self._process_partial(results, "source", dataset),
+                self.task_loss, self.domain_loss, self.generalize)
+
+        if self.target_domain and data_b is not None:
+            run_single_batch(*data_b, model, 1, self.num_domains,
+                lambda results: self._process_partial(results, "target", dataset),
+                self.task_loss, self.domain_loss, self.generalize)
 
     def train(self, model, data_a, data_b, step=None, train_time=None, evaluation=False):
         """
@@ -320,17 +308,17 @@ class Metrics:
         dataset = "training"
         self._reset_states(dataset)
 
-        # Only one batch is passed in for training, so make it a list so that
-        # we can reuse the _run_partial function. However, only if we have data.
-        if not evaluation:
-            data_a = [data_a]
-            data_b = [data_b]
-
         if not self.target_domain:
             data_b = None
 
         t = time.time()
-        self._run_partial(model, data_a, data_b, dataset)
+
+        # evaluation=True is a tf.data.Dataset, otherwise a single batch
+        if evaluation:
+            self._run_partial(model, data_a, data_b, dataset)
+        else:
+            self._run_batch(model, data_a, data_b, dataset)
+
         t = time.time() - t
 
         if not evaluation:

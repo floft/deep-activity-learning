@@ -85,7 +85,8 @@ def get_directory_names():
 
     return model_dir, log_dir
 
-def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
+@tf.function
+def train_step(data_a, data_b, model, opt, d_opt, global_step,
         source_domain, target_domain, task_loss, domain_loss):
     """ Compiled training step that we call many times """
     if data_a is not None:
@@ -110,6 +111,9 @@ def train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
         x = data_batch_a
         task_y_true = labels_batch_a
         domain_y_true = source_domain
+
+    # GRL schedule from DANN paper
+    grl_lambda = 2/(1+tf.exp(-10*(global_step/(FLAGS.steps+1))))-1
 
     # Run data through model and compute loss
     with tf.GradientTape() as tape, tf.GradientTape() as d_tape:
@@ -217,15 +221,12 @@ def train(num_classes, num_domains, input_shape,
 
     # Start training
     for i in range(int(global_step), FLAGS.steps+1):
-        # GRL schedule from DANN paper
-        grl_lambda = 2/(1+np.exp(-10*(i/(FLAGS.steps+1))))-1
-
         # Get data for this iteration
         data_a = next(train_data_a_iter) if train_data_a_iter is not None else None
         data_b = next(train_data_b_iter) if train_data_b_iter is not None else None
 
         t = time.time()
-        train_step(data_a, data_b, model, opt, d_opt, grl_lambda,
+        train_step(data_a, data_b, model, opt, d_opt, global_step,
             source_domain, target_domain, task_loss, domain_loss)
         global_step.assign_add(1)
         t = time.time() - t

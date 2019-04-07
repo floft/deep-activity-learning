@@ -34,44 +34,6 @@ from load_data import tf_domain_labels
 
 FLAGS = flags.FLAGS
 
-def run_multi_batch(data, *args, **kwargs):
-    """ Evaluate model on all batches in the data (data is a tf.data.Dataset) """
-    for x, task_y_true, domain_y_true in data:
-        run_single_batch(x, task_y_true, domain_y_true, *args, **kwargs)
-
-@tf.function
-def run_single_batch(x, task_y_true, domain_y_true, model, domain, num_domains,
-        after_batch, task_loss, domain_loss, generalize, domain_name, dataset_name):
-    """
-    Run a batch of data through the model. Call after_batch() afterwards:
-        after_batch([labels_batch_a, task_y_pred, domains_batch_a, domain_y_pred,
-            total_loss, task_loss, domain_loss], domain_name, dataset_name)
-
-    Domain should be either 0 or 1 (if num_domains==2).
-    """
-    # Note: if you do x.shape[0] here, it'll give None on last batch and error
-    batch_size = tf.shape(x)[0]
-
-    # Match the number of examples we have since the domain_y_true
-    # is meant for generalization, where it's a different number for
-    # each home
-    if not generalize:
-        domain_y_true = tf_domain_labels(domain, batch_size, num_domains)
-
-    # Evaluate model on data
-    task_y_pred, domain_y_pred = model(x, training=False)
-
-    # Calculate losses
-    task_l = task_loss(task_y_true, task_y_pred, training=False)
-    domain_l = domain_loss(domain_y_true, domain_y_pred)
-    total_l = task_l + domain_l
-
-    # Do whatever they want with the results of this batch
-    after_batch([
-        task_y_true, task_y_pred, domain_y_true, domain_y_pred,
-        total_l, task_l, domain_l,
-    ], domain_name, dataset_name)
-
 class Metrics:
     """
     Handles keeping track of metrics either over one batch or many batch, then
@@ -259,43 +221,71 @@ class Metrics:
         # Make sure we sync to disk
         self.writer.flush()
 
-    def _process_partial(self, results, domain, dataset):
-        """ Call this on each batch when running on train/test data (domain A = "source",
-        then domain B = "target") to update the partial metric results """
-        assert dataset in self.datasets, "unknown dataset "+str(dataset)
-        assert domain in self.domains, "unknown domain "+str(domain)
-        self._process_batch(results, domain, dataset)
-        self._process_per_class(results, domain, dataset)
-
-        # Only log losses on training data
-        if dataset == "training":
-            self._process_losses(results)
-
     def _run_partial(self, model, data_a, data_b, dataset):
         """ Run all the data A/B through the model -- data_a and data_b
         should both be of type tf.data.Dataset """
         if data_a is not None:
-            run_multi_batch(data_a, model, 0, self.num_domains,
-                self._process_partial, self.task_loss, self.domain_loss,
-                self.generalize, "source", dataset)
+            self._run_multi_batch(data_a, model, 0, "source", dataset)
 
         if self.target_domain and data_b is not None:
-            run_multi_batch(data_b, model, 1, self.num_domains,
-                self._process_partial, self.task_loss, self.domain_loss,
-                self.generalize, "target", dataset)
+            self._run_multi_batch(data_b, model, 1, "target", dataset)
 
     def _run_batch(self, model, data_a, data_b, dataset):
         """ Run a single batch of A/B data through the model -- data_a and data_b
         should both be a tuple of (x, task_y_true, domain_y_true) """
         if data_a is not None:
-            run_single_batch(*data_a, model, 0, self.num_domains,
-                self._process_partial, self.task_loss, self.domain_loss,
-                self.generalize, "source", dataset)
+            self._run_single_batch(*data_a, model, 0, "source", dataset)
 
         if self.target_domain and data_b is not None:
-            run_single_batch(*data_b, model, 1, self.num_domains,
-                self._process_partial, self.task_loss, self.domain_loss,
-                self.generalize, "target", dataset)
+            self._run_single_batch(*data_b, model, 1, "target", dataset)
+
+    def _run_multi_batch(self, data, *args, **kwargs):
+        """ Evaluate model on all batches in the data (data is a tf.data.Dataset) """
+        for x, task_y_true, domain_y_true in data:
+            self._run_single_batch(x, task_y_true, domain_y_true, *args, **kwargs)
+
+    @tf.function
+    def _run_single_batch(self, x, task_y_true, domain_y_true, model, domain_num,
+            domain_name, dataset_name):
+        """
+        Run a batch of data through the model. Call after_batch() afterwards:
+            after_batch([labels_batch_a, task_y_pred, domains_batch_a, domain_y_pred,
+                total_loss, task_loss, domain_loss], domain_name, dataset_name)
+
+        Domain should be either 0 or 1 (if num_domains==2).
+        """
+        assert dataset_name in self.datasets, "unknown dataset "+str(dataset_name)
+        assert domain_name in self.domains, "unknown domain "+str(domain_name)
+
+        # Note: if you do x.shape[0] here, it'll give None on last batch and error
+        batch_size = tf.shape(x)[0]
+
+        # Match the number of examples we have since the domain_y_true
+        # is meant for generalization, where it's a different number for
+        # each home
+        if not self.generalize:
+            domain_y_true = tf_domain_labels(domain_num, batch_size, self.num_domains)
+
+        # Evaluate model on data
+        task_y_pred, domain_y_pred = model(x, training=False)
+
+        # Calculate losses
+        task_l = self.task_loss(task_y_true, task_y_pred, training=False)
+        domain_l = self.domain_loss(domain_y_true, domain_y_pred)
+        total_l = task_l + domain_l
+
+        # Process this batch
+        results = [
+            task_y_true, task_y_pred, domain_y_true, domain_y_pred,
+            total_l, task_l, domain_l,
+        ]
+
+        self._process_batch(results, domain_name, dataset_name)
+        self._process_per_class(results, domain_name, dataset_name)
+
+        # Only log losses on training data
+        if dataset_name == "training":
+            self._process_losses(results)
 
     def train(self, model, data_a, data_b, step=None, train_time=None, evaluation=False):
         """

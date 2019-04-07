@@ -41,11 +41,11 @@ def run_multi_batch(data, *args, **kwargs):
 
 @tf.function
 def run_single_batch(x, task_y_true, domain_y_true, model, domain, num_domains,
-        after_batch, task_loss, domain_loss, generalize):
+        after_batch, task_loss, domain_loss, generalize, domain_name, dataset_name):
     """
     Run a batch of data through the model. Call after_batch() afterwards:
         after_batch([labels_batch_a, task_y_pred, domains_batch_a, domain_y_pred,
-            total_loss, task_loss, domain_loss])
+            total_loss, task_loss, domain_loss], domain_name, dataset_name)
 
     Domain should be either 0 or 1 (if num_domains==2).
     """
@@ -70,7 +70,7 @@ def run_single_batch(x, task_y_true, domain_y_true, model, domain, num_domains,
     after_batch([
         task_y_true, task_y_pred, domain_y_true, domain_y_pred,
         total_l, task_l, domain_l,
-    ])
+    ], domain_name, dataset_name)
 
 class Metrics:
     """
@@ -148,14 +148,6 @@ class Metrics:
         self.loss_total = tf.keras.metrics.Mean(name="loss/total")
         self.loss_task = tf.keras.metrics.Mean(name="loss/task")
         self.loss_domain = tf.keras.metrics.Mean(name="loss/domain")
-
-        # We need to create these lambda functions only once so that tf.function
-        # doesn't keep recompiling every time we update the metrics
-        self._process_partial_lambdas = {}
-        for dataset in self.datasets:
-            for domain in self.domains:
-                self._process_partial_lambdas["%s/%s"%(domain, dataset)] = \
-                    lambda results: self._process_partial(results, domain, dataset)
 
     def _reset_states(self, dataset):
         """ Reset states of all the Keras metrics """
@@ -284,26 +276,26 @@ class Metrics:
         should both be of type tf.data.Dataset """
         if data_a is not None:
             run_multi_batch(data_a, model, 0, self.num_domains,
-                self._process_partial_lambdas["source/%s"%dataset],
-                self.task_loss, self.domain_loss, self.generalize)
+                self._process_partial, self.task_loss, self.domain_loss,
+                self.generalize, "source", dataset)
 
         if self.target_domain and data_b is not None:
             run_multi_batch(data_b, model, 1, self.num_domains,
-                self._process_partial_lambdas["target/%s"%dataset],
-                self.task_loss, self.domain_loss, self.generalize)
+                self._process_partial, self.task_loss, self.domain_loss,
+                self.generalize, "target", dataset)
 
     def _run_batch(self, model, data_a, data_b, dataset):
         """ Run a single batch of A/B data through the model -- data_a and data_b
         should both be a tuple of (x, task_y_true, domain_y_true) """
         if data_a is not None:
             run_single_batch(*data_a, model, 0, self.num_domains,
-                self._process_partial_lambdas["source/%s"%dataset],
-                self.task_loss, self.domain_loss, self.generalize)
+                self._process_partial, self.task_loss, self.domain_loss,
+                self.generalize, "source", dataset)
 
         if self.target_domain and data_b is not None:
             run_single_batch(*data_b, model, 1, self.num_domains,
-                self._process_partial_lambdas["target/%s"%dataset],
-                self.task_loss, self.domain_loss, self.generalize)
+                self._process_partial, self.task_loss, self.domain_loss,
+                self.generalize, "target", dataset)
 
     def train(self, model, data_a, data_b, step=None, train_time=None, evaluation=False):
         """
@@ -334,7 +326,7 @@ class Metrics:
             assert step is not None and train_time is not None, \
                 "Must pass step and train_time to train() if evaluation=False"
             step = int(step)
-            self._write_data(step, "training", t, train_time)
+            self._write_data(step, dataset, t, train_time)
 
     def test(self, model, eval_data_a, eval_data_b, step=None, evaluation=False):
         """

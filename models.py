@@ -10,7 +10,8 @@ make_{task,domain}_loss() functions. Also, compute_accuracy() if desired.
 
 Usage:
     # Build our model
-    model = DomainAdaptationModel(num_classes, num_domains)
+    model = DomainAdaptationModel(num_classes, num_domains, "flat",
+            generalize=False)
 
     # During training
     task_y_pred, domain_y_pred = model(x, grl_lambda=1.0, training=True)

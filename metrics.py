@@ -16,7 +16,7 @@ Usage during training (logging to a log file for TensorBoard):
 
 Usage after training (evaluating but not logging):
     metrics = Metrics(log_dir, num_classes, num_domains, al_config,
-        None, None, domain_b_data is not None)
+        None, None, generalize, domain_b_data is not None)
 
     # Evaluate on datasets
     metrics.train(model, train_data_a, train_data_b, evaluation=True)
